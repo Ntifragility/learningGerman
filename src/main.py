@@ -121,7 +121,7 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
             if "/api/" in req or status not in ("200", "204", "304"):
                 super().log_message(format, *args)
         except Exception:
-            super().log_message(format, *args)
+            pass
 
 
 def find_free_port(start_port=8080, max_attempts=50):
