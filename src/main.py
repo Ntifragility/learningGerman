@@ -29,6 +29,11 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(UI_DIR), **kwargs)
 
     def do_GET(self):
+        if self.path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
+
         if self.path.startswith("/downloads/"):
             rel_path = urllib.parse.unquote(self.path[len("/downloads/"):])
             file_path = DOWNLOADS_DIR / rel_path
@@ -83,7 +88,12 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode("utf-8"))
 
     def log_message(self, format, *args):
-        if "/api/" in args[0] or args[1] != "200":
+        try:
+            req = str(args[0]) if len(args) > 0 else ""
+            status = str(args[1]) if len(args) > 1 else ""
+            if "/api/" in req or status not in ("200", "204", "304"):
+                super().log_message(format, *args)
+        except Exception:
             super().log_message(format, *args)
 
 
