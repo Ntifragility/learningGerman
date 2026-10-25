@@ -469,20 +469,10 @@ class MiniLinguaFloatApp {
       span.dataset.id = wIdx;
       span.textContent = w.w;
 
-      // Clicking specific word jumps to word start
+      // Clicking any word restarts both text and audio from the beginning of the paragraph
       span.addEventListener("click", (e) => {
-        e.stopPropagation(); // Stop paragraph click to prioritize exact word
-        this.stopCurrentPlayback();
-
-        if (this.activeWordIndex !== -1 && this.wordDOMElements[this.activeWordIndex]) {
-          this.wordDOMElements[this.activeWordIndex].classList.remove("active");
-        }
-
-        this.activeWordIndex = wIdx;
-        span.classList.add("active");
-        this.setActiveSegment(w.seg);
-        this.seekTo(w.s);
-        this.play();
+        e.stopPropagation();
+        this.clickParagraph(w.seg);
       });
 
       const parentParrafo = this.parrafoDOMElements[w.seg];
