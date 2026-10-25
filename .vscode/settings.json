@@ -1,5 +1,6 @@
 {
   "python.terminal.executeInFileDir": false,
+  "python.defaultInterpreterPath": "C:\\Users\\mvillafuerte\\python311_Virtual_env\\python.exe",
   "python.analysis.extraPaths": [
     "${workspaceFolder}/src"
   ]
