@@ -45,6 +45,14 @@ class MiniLinguaFloatApp {
     this.wordDOMElements = [];
     this.parrafoDOMElements = [];
 
+    // Loader overlay elements
+    this.loaderOverlay = document.getElementById("loader-overlay");
+    this.loaderTitle = document.getElementById("loader-title");
+    this.loaderSub = document.getElementById("loader-sub");
+    this.loaderBar = document.getElementById("loader-bar");
+    this.loaderPct = document.getElementById("loader-pct");
+    this.loaderInterval = null;
+
     this.init();
   }
 
@@ -493,12 +501,60 @@ class MiniLinguaFloatApp {
     }
   }
 
+  showLoader(title, subtitle) {
+    if (this.loaderOverlay) {
+      this.loaderTitle.textContent = title || "Processing Audio...";
+      this.loaderSub.textContent = subtitle || "Connecting...";
+      this.loaderBar.style.width = "0%";
+      this.loaderPct.textContent = "0%";
+      this.loaderOverlay.style.display = "flex";
+    }
+  }
+
+  setLoaderProgress(pct, subtitle) {
+    if (this.loaderBar && this.loaderPct) {
+      const clamped = Math.min(100, Math.max(0, pct));
+      this.loaderBar.style.width = `${clamped}%`;
+      this.loaderPct.textContent = `${Math.round(clamped)}%`;
+    }
+    if (subtitle && this.loaderSub) {
+      this.loaderSub.textContent = subtitle;
+    }
+  }
+
+  hideLoader() {
+    if (this.loaderInterval) {
+      clearInterval(this.loaderInterval);
+      this.loaderInterval = null;
+    }
+    if (this.loaderOverlay) {
+      this.loaderOverlay.style.display = "none";
+    }
+  }
+
   async processYouTubeUrl() {
     const url = this.ytUrlInput.value.trim();
     if (!url) return;
 
     this.urlModal.style.display = "none";
-    this.statusHint.textContent = "Processing YouTube & German Transcript...";
+    this.showLoader("Processing German Audio", "Connecting to YouTube stream...");
+
+    // Simulated stepped progress while server downloads and transcribes
+    let simulatedPct = 5;
+    this.setLoaderProgress(simulatedPct, "Downloading audio stream...");
+
+    this.loaderInterval = setInterval(() => {
+      if (simulatedPct < 35) {
+        simulatedPct += 3;
+        this.setLoaderProgress(simulatedPct, "Downloading audio stream (.m4a)...");
+      } else if (simulatedPct < 85) {
+        simulatedPct += 1.5;
+        this.setLoaderProgress(simulatedPct, "Whisper AI transcribing German words & VAD...");
+      } else if (simulatedPct < 96) {
+        simulatedPct += 0.5;
+        this.setLoaderProgress(simulatedPct, "Aligning word timestamps...");
+      }
+    }, 400);
 
     try {
       const res = await fetch("/api/process-youtube", {
@@ -507,27 +563,45 @@ class MiniLinguaFloatApp {
         body: JSON.stringify({ url: url })
       });
 
-      if (!res.ok) throw new Error("Processing failed");
+      if (!res.ok) throw new Error("Processing failed on server");
       const data = await res.json();
 
-      if (data.transcript) {
-        this.headerTitle.textContent = data.title || "YouTube Audio";
-        this.renderTranscript(data.transcript);
+      if (data.error) throw new Error(data.error);
 
-        if (data.audio_url) {
-          this.activePlayerType = "audio";
-          this.audio.src = data.audio_url;
-          this.audio.load();
-        } else if (data.video_id) {
-          this.mountYouTubeVideo(data.video_id);
+      // Finish progress to 100%
+      clearInterval(this.loaderInterval);
+      this.setLoaderProgress(100, "Done! Interactive script ready.");
+
+      setTimeout(() => {
+        this.hideLoader();
+
+        if (data.transcript) {
+          this.headerTitle.textContent = data.title || "YouTube Audio";
+          this.renderTranscript(data.transcript);
+
+          if (data.audio_url) {
+            this.activePlayerType = "audio";
+            this.audio.src = data.audio_url;
+            this.audio.load();
+          } else if (data.video_id) {
+            this.mountYouTubeVideo(data.video_id);
+          }
+
+          this.statusHint.textContent = "Ready • Click paragraph to play";
+          this.play();
         }
+      }, 500);
 
-        this.statusHint.textContent = "Ready • Click paragraph to play";
-        this.play();
-      }
     } catch (err) {
+      clearInterval(this.loaderInterval);
       console.warn("API error:", err);
-      this.statusHint.textContent = "Backend offline. Check main.py console.";
+      this.setLoaderProgress(0, "Error: Could not process audio");
+      this.loaderTitle.textContent = "Processing Failed";
+      this.statusHint.textContent = "Error: Check URL or main.py terminal";
+
+      setTimeout(() => {
+        this.hideLoader();
+      }, 2500);
     }
   }
 

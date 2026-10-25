@@ -64,6 +64,19 @@
       <!-- Injected dynamically as .parrafo elements -->
     </main>
 
+    <!-- Processing Progress Overlay -->
+    <div id="loader-overlay" class="loader-overlay" style="display: none;">
+      <div class="loader-card">
+        <div class="loader-spinner"></div>
+        <div id="loader-title" class="loader-title">Processing Audio...</div>
+        <div id="loader-sub" class="loader-sub">Downloading audio stream...</div>
+        <div class="loader-track">
+          <div id="loader-bar" class="loader-bar"></div>
+        </div>
+        <span id="loader-pct" class="loader-pct">0%</span>
+      </div>
+    </div>
+
     <!-- Quick URL Modal / Dropdown -->
     <div id="url-modal" class="url-modal" style="display: none;">
       <div class="url-modal-content">
