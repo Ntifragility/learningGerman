@@ -60,6 +60,14 @@ class MiniLinguaFloatApp {
     this.currentSegmentRepeats = 0;
     this.btnCycleLoop = document.getElementById("btn-cycle-loop");
 
+    // Multi-Paragraph Range Loop (A-B)
+    this.loopRange = null; // { start: int, end: int }
+    this.abSelectionStep = 0; // 0 = idle, 1 = awaiting A, 2 = awaiting B
+    this.abPendingStart = -1;
+    this.rangeLoopCount = 0;
+    this.btnAbLoop = document.getElementById("btn-ab-loop");
+    this.rangeBadge = document.getElementById("range-badge");
+
     // Feature 6: Global Shortcuts (with master ON/OFF toggle)
     this.shortcutsEnabled = true;
     this.btnToggleShortcuts = document.getElementById("btn-toggle-shortcuts");
@@ -202,6 +210,14 @@ class MiniLinguaFloatApp {
       this.btnCycleLoop.addEventListener("click", () => this.cycleLoopMode());
     }
 
+    // Multi-Paragraph A-B Range Loop
+    if (this.btnAbLoop) {
+      this.btnAbLoop.addEventListener("click", () => this.toggleAbMode());
+    }
+    if (this.rangeBadge) {
+      this.rangeBadge.addEventListener("click", () => this.clearLoopRange());
+    }
+
     // Feature 6: Toggle Shortcuts
     if (this.btnToggleShortcuts) {
       this.btnToggleShortcuts.addEventListener("click", () => {
@@ -306,8 +322,31 @@ class MiniLinguaFloatApp {
   syncStep(currentTime) {
     if (!this.words.length) return;
 
-    // Feature 3: Loop / Shadowing check at end of current paragraph
-    if (this.activeSegmentIndex !== -1 && this.loopModes[this.loopModeIndex] > 0) {
+    // Feature: Multi-Paragraph Range Loop (A-B)
+    if (this.loopRange !== null) {
+      const endSeg = this.segments[this.loopRange.end];
+      if (endSeg && currentTime >= endSeg.end - 0.08 && currentTime <= endSeg.end + 0.4) {
+        const maxLoops = this.loopModes[this.loopModeIndex] > 0 ? this.loopModes[this.loopModeIndex] : Infinity;
+        if (this.rangeLoopCount < maxLoops) {
+          this.rangeLoopCount++;
+          const startSeg = this.segments[this.loopRange.start];
+          this.seekTo(startSeg.start);
+          this.setActiveSegment(this.loopRange.start, true);
+          this.play();
+          const targetStr = maxLoops === Infinity ? "∞" : maxLoops;
+          this.statusHint.textContent = `§ ${this.loopRange.start + 1}–${this.loopRange.end + 1} (Loop ${this.rangeLoopCount}/${targetStr})`;
+          return;
+        } else {
+          this.rangeLoopCount = 0;
+          if (this.loopModes[this.loopModeIndex] > 0) {
+            this.pause();
+            this.statusHint.textContent = `Completed § ${this.loopRange.start + 1}–${this.loopRange.end + 1}`;
+            return;
+          }
+        }
+      }
+    } else if (this.activeSegmentIndex !== -1 && this.loopModes[this.loopModeIndex] > 0) {
+      // Feature 3: Single paragraph Loop / Shadowing check at end of current paragraph
       const curSeg = this.segments[this.activeSegmentIndex];
       const maxLoops = this.loopModes[this.loopModeIndex];
       if (curSeg && currentTime >= curSeg.end - 0.08 && currentTime <= curSeg.end + 0.3) {
@@ -652,8 +691,12 @@ class MiniLinguaFloatApp {
       parrafoEl.appendChild(textContainer);
 
       // Clicking ANYWHERE on the paragraph stops current section & starts reproducing it
-      parrafoEl.addEventListener("click", () => {
-        this.clickParagraph(sIdx);
+      parrafoEl.addEventListener("click", (e) => {
+        if (e.shiftKey) {
+          this.handleShiftClickParagraph(sIdx);
+        } else {
+          this.handleParagraphClick(sIdx);
+        }
       });
 
       this.transcriptContainer.appendChild(parrafoEl);
@@ -680,7 +723,11 @@ class MiniLinguaFloatApp {
       // Clicking any word restarts both text and audio from the beginning of the paragraph
       span.addEventListener("click", (e) => {
         e.stopPropagation();
-        this.clickParagraph(w.seg);
+        if (e.shiftKey) {
+          this.handleShiftClickParagraph(w.seg);
+        } else {
+          this.handleParagraphClick(w.seg);
+        }
       });
 
       const parentParrafo = this.parrafoDOMElements[w.seg];
@@ -698,6 +745,7 @@ class MiniLinguaFloatApp {
     this.activeSegmentIndex = -1;
     this.isUserBrowsing = false;
     this.currentSegmentRepeats = 0;
+    this.clearLoopRange();
     this.updateScrollButtonState();
     this.transcriptContainer.classList.toggle("genders-enabled", this.gendersEnabled);
     if (this.segments.length > 0) {
@@ -1237,6 +1285,135 @@ class MiniLinguaFloatApp {
     }
   }
 
+  // Multi-Paragraph Range Loop (A-B) Methods
+  toggleAbMode() {
+    if (this.loopRange) {
+      this.clearLoopRange();
+      return;
+    }
+
+    if (this.abSelectionStep === 0) {
+      this.abSelectionStep = 1;
+      this.abPendingStart = -1;
+      if (this.btnAbLoop) this.btnAbLoop.classList.add("range-active");
+      this.statusHint.textContent = "A-B: Click Start § [A]";
+    } else {
+      this.abSelectionStep = 0;
+      this.abPendingStart = -1;
+      if (this.btnAbLoop) this.btnAbLoop.classList.remove("range-active");
+      this.updateLoopRangeUI();
+      this.statusHint.textContent = "A-B: Cancelled";
+    }
+  }
+
+  handleParagraphClick(segIdx) {
+    if (this.abSelectionStep === 1) {
+      this.abPendingStart = segIdx;
+      this.abSelectionStep = 2;
+      this.updateLoopRangeUI();
+      this.statusHint.textContent = `A-B: [A] = § ${segIdx + 1}. Click End § [B]`;
+      return;
+    }
+    if (this.abSelectionStep === 2) {
+      const start = Math.min(this.abPendingStart, segIdx);
+      const end = Math.max(this.abPendingStart, segIdx);
+      this.abSelectionStep = 0;
+      this.abPendingStart = -1;
+      this.setLoopRange(start, end);
+      this.clickParagraph(start);
+      return;
+    }
+    this.clickParagraph(segIdx);
+  }
+
+  handleShiftClickParagraph(segIdx) {
+    let anchor = this.activeSegmentIndex >= 0 ? this.activeSegmentIndex : 0;
+    if (this.loopRange) {
+      anchor = this.loopRange.start;
+    }
+    const start = Math.min(anchor, segIdx);
+    const end = Math.max(anchor, segIdx);
+    this.setLoopRange(start, end);
+    this.clickParagraph(start);
+  }
+
+  setLoopRange(startIdx, endIdx) {
+    if (!this.segments || this.segments.length === 0) return;
+    const start = Math.max(0, Math.min(startIdx, endIdx));
+    const end = Math.min(this.segments.length - 1, Math.max(startIdx, endIdx));
+    this.loopRange = { start, end };
+    this.rangeLoopCount = 0;
+    this.updateLoopRangeUI();
+    this.statusHint.textContent = `Looping § ${start + 1}–${end + 1} (Shift+Click to change)`;
+  }
+
+  clearLoopRange() {
+    this.loopRange = null;
+    this.abSelectionStep = 0;
+    this.abPendingStart = -1;
+    this.rangeLoopCount = 0;
+    this.updateLoopRangeUI();
+    if (this.statusHint) this.statusHint.textContent = "Loop range cleared";
+  }
+
+  updateLoopRangeUI() {
+    if (this.btnAbLoop) {
+      this.btnAbLoop.classList.toggle("range-active", !!this.loopRange || this.abSelectionStep > 0);
+      if (this.loopRange) {
+        this.btnAbLoop.title = `Looping § ${this.loopRange.start + 1}–${this.loopRange.end + 1} (Click to clear)`;
+      } else {
+        this.btnAbLoop.title = "Multi-Paragraph Loop (Shift+Click or click here)";
+      }
+    }
+
+    if (this.rangeBadge) {
+      if (this.loopRange) {
+        this.rangeBadge.style.display = "inline-block";
+        this.rangeBadge.textContent = `🔁 § ${this.loopRange.start + 1}–${this.loopRange.end + 1} ✕`;
+      } else {
+        this.rangeBadge.style.display = "none";
+      }
+    }
+
+    this.parrafoDOMElements.forEach((el, idx) => {
+      el.classList.remove("in-loop-range", "loop-range-start", "loop-range-end");
+      const tag = el.querySelector(".parrafo-tag");
+      if (tag) {
+        const badges = tag.querySelectorAll(".loop-range-badge");
+        badges.forEach((b) => b.remove());
+      }
+
+      if (this.loopRange && idx >= this.loopRange.start && idx <= this.loopRange.end) {
+        el.classList.add("in-loop-range");
+
+        if (tag) {
+          if (idx === this.loopRange.start) {
+            el.classList.add("loop-range-start");
+            const badgeA = document.createElement("span");
+            badgeA.className = "loop-range-badge";
+            badgeA.textContent = "[A]";
+            tag.prepend(badgeA);
+          }
+          if (idx === this.loopRange.end) {
+            el.classList.add("loop-range-end");
+            const badgeB = document.createElement("span");
+            badgeB.className = "loop-range-badge";
+            badgeB.textContent = "[B]";
+            tag.appendChild(badgeB);
+          }
+        }
+      } else if (!this.loopRange && this.abSelectionStep === 2 && idx === this.abPendingStart) {
+        el.classList.add("loop-range-start");
+        if (tag) {
+          const badgeA = document.createElement("span");
+          badgeA.className = "loop-range-badge";
+          badgeA.textContent = "[A?]";
+          tag.prepend(badgeA);
+        }
+      }
+    });
+  }
+
   toggleTickerMode() {
     this.isTickerMode = !this.isTickerMode;
     if (this.miniAppContainer) {
@@ -1321,6 +1498,12 @@ class MiniLinguaFloatApp {
     } else if (e.code === "KeyT") {
       e.preventDefault();
       this.toggleTickerMode();
+    } else if (e.code === "KeyL") {
+      e.preventDefault();
+      this.toggleAbMode();
+    } else if (e.code === "Escape" && (this.loopRange || this.abSelectionStep > 0)) {
+      e.preventDefault();
+      this.clearLoopRange();
     }
   }
 

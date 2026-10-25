@@ -28,6 +28,9 @@
         <!-- Shadowing / Auto-Loop toggle -->
         <button id="btn-cycle-loop" class="btn-tool" title="Loop Sentence: OFF / 1x / 2x / ∞">🔁</button>
 
+        <!-- Multi-Paragraph A-B Range Loop -->
+        <button id="btn-ab-loop" class="btn-tool" title="Multi-Paragraph Loop (Shift+Click or click here)">A-B</button>
+
         <!-- Noun Gender Highlighting toggle (der=blue, die=red, das=green) -->
         <button id="btn-toggle-gender" class="btn-tool active" title="Noun Genders (der=blue, die=red, das=green)">🎨</button>
 
@@ -63,6 +66,7 @@
       <div class="time-and-progress">
         <div class="time-row">
           <span id="time-display" class="time-text">0:00 / 0:00</span>
+          <span id="range-badge" class="range-badge" style="display: none;" title="Click to clear loop range">🔁 § A–B ✕</span>
           <span id="status-hint" class="status-hint">Click paragraph to replay</span>
         </div>
         <div id="progress-container" class="progress-container">

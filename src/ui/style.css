@@ -268,6 +268,68 @@ html, body {
   box-shadow: 0 2px 12px rgba(245, 158, 11, 0.1);
 }
 
+/* Multi-Paragraph Loop Range Styling */
+.parrafo.in-loop-range {
+  background: rgba(168, 85, 247, 0.08);
+  border-left: 3px solid #c084fc;
+}
+
+.parrafo.loop-range-start {
+  border-top: 1px solid rgba(192, 132, 252, 0.5);
+  box-shadow: 0 -2px 8px rgba(192, 132, 252, 0.15);
+}
+
+.parrafo.loop-range-end {
+  border-bottom: 1px solid rgba(192, 132, 252, 0.5);
+  box-shadow: 0 2px 8px rgba(192, 132, 252, 0.15);
+}
+
+.parrafo.in-loop-range.active-parrafo {
+  background: rgba(168, 85, 247, 0.18);
+  border-left-color: var(--accent-gold);
+  box-shadow: 0 2px 14px rgba(245, 158, 11, 0.18);
+}
+
+.loop-range-badge {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: #a855f7;
+  color: #fff;
+  margin-right: 4px;
+  display: inline-block;
+}
+
+.range-badge {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.range-badge:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.btn-tool.range-active {
+  color: #c084fc;
+  border-color: rgba(192, 132, 252, 0.6);
+  background: rgba(192, 132, 252, 0.2);
+  box-shadow: 0 0 8px rgba(192, 132, 252, 0.35);
+  font-weight: 700;
+}
+
 .parrafo-meta {
   display: flex;
   align-items: center;
