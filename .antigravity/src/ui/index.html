@@ -28,11 +28,9 @@
         <!-- Auto-scroll status indicator -->
         <button id="btn-toggle-scroll" class="btn-tool active" title="Auto-Scroll ON/OFF">📜</button>
 
-        <!-- Local file load -->
-        <label class="btn-tool" title="Open local audio/json">
-          📁
-          <input type="file" id="local-file-input" accept="audio/*,.json" style="display: none;">
-        </label>
+        <!-- Saved Library & Local file load -->
+        <button id="btn-open-library-modal" class="btn-tool" title="Saved Lessons & Local Files">📁</button>
+        <input type="file" id="local-file-input" accept="audio/*,.json" multiple style="display: none;">
       </div>
     </header>
 
@@ -89,6 +87,22 @@
         <div class="modal-buttons">
           <button id="btn-submit-url" class="btn-modal-primary">Load</button>
           <button id="btn-close-modal" class="btn-modal-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Library Modal: Saved in downloads/ & Local files -->
+    <div id="library-modal" class="url-modal" style="display: none;">
+      <div class="url-modal-content library-modal-content">
+        <div class="library-header">
+          <span class="library-title">📁 Saved Lessons</span>
+          <button id="btn-close-library" class="btn-modal-close" title="Close">✕</button>
+        </div>
+        <div id="library-list" class="library-list">
+          <div class="library-loading">Loading saved lessons...</div>
+        </div>
+        <div class="library-footer">
+          <button id="btn-browse-local" class="btn-modal-secondary" style="width: 100%;">📂 Browse Local (Audio + JSON)</button>
         </div>
       </div>
     </div>

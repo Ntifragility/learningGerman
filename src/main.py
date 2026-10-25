@@ -34,6 +34,33 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             return
 
+        if self.path == "/api/list-downloads":
+            items = []
+            for json_file in sorted(DOWNLOADS_DIR.glob("*_transcript.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+                try:
+                    stem = json_file.stem.replace("_transcript", "")
+                    audio_file = None
+                    for ext in [".m4a", ".mp3", ".wav", ".mp4", ".ogg"]:
+                        cand = DOWNLOADS_DIR / f"{stem}{ext}"
+                        if cand.exists():
+                            audio_file = cand
+                            break
+                    with open(json_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    meta = data.get("meta", {})
+                    items.append({
+                        "id": stem,
+                        "title": meta.get("title") or stem,
+                        "duration_sec": meta.get("duration_sec", 0),
+                        "words": meta.get("word_count", 0),
+                        "audio_url": f"/downloads/{audio_file.name}" if audio_file else None,
+                        "json_url": f"/downloads/{json_file.name}"
+                    })
+                except Exception:
+                    continue
+            self.send_json_response({"items": items})
+            return
+
         if self.path.startswith("/downloads/"):
             rel_path = urllib.parse.unquote(self.path[len("/downloads/"):])
             file_path = DOWNLOADS_DIR / rel_path

@@ -43,6 +43,13 @@ class MiniLinguaFloatApp {
     this.btnCloseModal = document.getElementById("btn-close-modal");
     this.localFileInput = document.getElementById("local-file-input");
 
+    // Library modal elements
+    this.btnOpenLibraryModal = document.getElementById("btn-open-library-modal");
+    this.libraryModal = document.getElementById("library-modal");
+    this.btnCloseLibrary = document.getElementById("btn-close-library");
+    this.libraryList = document.getElementById("library-list");
+    this.btnBrowseLocal = document.getElementById("btn-browse-local");
+
     this.wordDOMElements = [];
     this.parrafoDOMElements = [];
 
@@ -144,6 +151,22 @@ class MiniLinguaFloatApp {
 
     // Local file input
     this.localFileInput.addEventListener("change", (e) => this.handleLocalFile(e));
+
+    // Library Modal
+    if (this.btnOpenLibraryModal) {
+      this.btnOpenLibraryModal.addEventListener("click", () => this.openLibraryModal());
+    }
+    if (this.btnCloseLibrary) {
+      this.btnCloseLibrary.addEventListener("click", () => {
+        if (this.libraryModal) this.libraryModal.style.display = "none";
+      });
+    }
+    if (this.btnBrowseLocal) {
+      this.btnBrowseLocal.addEventListener("click", () => {
+        if (this.libraryModal) this.libraryModal.style.display = "none";
+        this.localFileInput.click();
+      });
+    }
 
     // Audio element native listeners
     this.audio.addEventListener("play", () => {
@@ -727,29 +750,167 @@ class MiniLinguaFloatApp {
     }
   }
 
-  handleLocalFile(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+  async openLibraryModal() {
+    if (!this.libraryModal) return;
+    this.libraryModal.style.display = "flex";
+    await this.fetchSavedDownloads();
+  }
 
-    if (file.name.endsWith(".json")) {
+  async fetchSavedDownloads() {
+    if (!this.libraryList) return;
+    this.libraryList.innerHTML = '<div class="library-loading">Loading saved lessons...</div>';
+
+    try {
+      const res = await fetch("/api/list-downloads");
+      if (!res.ok) throw new Error("Could not load downloads");
+      const data = await res.json();
+      const items = data.items || [];
+
+      if (!items.length) {
+        this.libraryList.innerHTML = '<div class="library-empty">No saved lessons in downloads/<br><span style="font-size:9px;color:var(--text-muted)">Load a YouTube link to save lessons</span></div>';
+        return;
+      }
+
+      this.libraryList.innerHTML = "";
+      items.forEach((item) => {
+        const itemEl = document.createElement("div");
+        itemEl.className = "library-item";
+
+        const info = document.createElement("div");
+        info.className = "library-item-info";
+
+        const title = document.createElement("span");
+        title.className = "library-item-title";
+        title.textContent = item.title;
+
+        const meta = document.createElement("span");
+        meta.className = "library-item-meta";
+        const dur = this.formatTime(item.duration_sec);
+        meta.textContent = `${dur} • ${item.words || 0} words`;
+
+        info.appendChild(title);
+        info.appendChild(meta);
+
+        const playBtn = document.createElement("button");
+        playBtn.className = "library-play-btn";
+        playBtn.textContent = "▶ Load";
+
+        itemEl.appendChild(info);
+        itemEl.appendChild(playBtn);
+
+        itemEl.addEventListener("click", () => this.loadSavedItem(item));
+
+        this.libraryList.appendChild(itemEl);
+      });
+    } catch (err) {
+      this.libraryList.innerHTML = '<div class="library-empty">Failed to load downloads list</div>';
+    }
+  }
+
+  async loadSavedItem(item) {
+    if (this.libraryModal) this.libraryModal.style.display = "none";
+    this.statusHint.textContent = `Loading ${item.title}...`;
+
+    try {
+      const res = await fetch(item.json_url);
+      if (!res.ok) throw new Error("Could not load transcript JSON");
+      const transcriptData = await res.json();
+
+      this.headerTitle.textContent = item.title;
+      this.renderTranscript(transcriptData);
+
+      if (item.audio_url) {
+        this.activePlayerType = "audio";
+        this.audio.src = item.audio_url;
+        this.audio.load();
+      }
+
+      this.statusHint.textContent = `Ready • ${item.title}`;
+      this.play();
+    } catch (err) {
+      console.error(err);
+      this.statusHint.textContent = "Error loading saved lesson";
+    }
+  }
+
+  async handleLocalFile(e) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    e.target.value = ""; // Reset so re-selecting same file triggers event
+
+    let audioFile = files.find(f => f.type.startsWith("audio/") || /\.(mp3|m4a|wav|ogg|aac|flac)$/i.test(f.name));
+    let jsonFile = files.find(f => f.name.endsWith(".json"));
+
+    // Case 1: Both audio and JSON selected together
+    if (audioFile && jsonFile) {
+      await this.readAndRenderJson(jsonFile);
+      this.loadAudioBlob(audioFile);
+      return;
+    }
+
+    // Case 2: Only JSON file was selected
+    if (jsonFile && !audioFile) {
+      const parsed = await this.readAndRenderJson(jsonFile);
+      if (parsed && parsed.meta && parsed.meta.audio_file) {
+        const audioName = parsed.meta.audio_file;
+        this.activePlayerType = "audio";
+        this.audio.src = `/downloads/${encodeURIComponent(audioName)}`;
+        this.audio.load();
+        this.headerTitle.textContent = (parsed.meta && parsed.meta.title) || audioName;
+        this.statusHint.textContent = `Ready • ${audioName}`;
+      }
+      return;
+    }
+
+    // Case 3: Only audio file was selected
+    if (audioFile) {
+      this.loadAudioBlob(audioFile);
+
+      // Automatically search for companion transcript in downloads/
+      const baseStem = audioFile.name.replace(/\.[^/.]+$/, "");
+      const companionJsonUrl = `/downloads/${encodeURIComponent(baseStem)}_transcript.json`;
+
+      try {
+        const res = await fetch(companionJsonUrl);
+        if (res.ok) {
+          const transcriptData = await res.json();
+          this.renderTranscript(transcriptData);
+          this.statusHint.textContent = `Loaded audio & companion transcript for ${baseStem}`;
+          return;
+        }
+      } catch (err) {
+        console.warn("No companion transcript on server:", err);
+      }
+
+      this.statusHint.textContent = "Audio loaded • Select matching .json or load URL";
+    }
+  }
+
+  loadAudioBlob(file) {
+    this.activePlayerType = "audio";
+    this.audio.src = URL.createObjectURL(file);
+    this.audio.load();
+    this.headerTitle.textContent = file.name;
+    this.play();
+  }
+
+  readAndRenderJson(file) {
+    return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (event) => {
         try {
           const parsed = JSON.parse(event.target.result);
           this.renderTranscript(parsed);
+          this.headerTitle.textContent = (parsed.meta && parsed.meta.title) || file.name;
           this.statusHint.textContent = `Loaded: ${file.name}`;
+          resolve(parsed);
         } catch (err) {
           this.statusHint.textContent = "Invalid JSON file";
+          resolve(null);
         }
       };
       reader.readAsText(file);
-    } else if (file.type.startsWith("audio/")) {
-      this.activePlayerType = "audio";
-      this.audio.src = URL.createObjectURL(file);
-      this.audio.load();
-      this.headerTitle.textContent = file.name;
-      this.statusHint.textContent = "Audio loaded • Click paragraph";
-    }
+    });
   }
 
   loadInitialDemo() {
