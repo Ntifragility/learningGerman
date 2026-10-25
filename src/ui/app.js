@@ -10,6 +10,7 @@ class MiniLinguaFloatApp {
     this.activeWordIndex = -1;
     this.activeSegmentIndex = -1;
     this.autoScrollEnabled = true;
+    this.isUserBrowsing = false;
     this.isPlaying = false;
     this.activePlayerType = "clock"; // Default to "clock" until audio/yt loaded
     this.ytPlayer = null;
@@ -73,11 +74,56 @@ class MiniLinguaFloatApp {
     // Cycle speed
     this.btnCycleSpeed.addEventListener("click", () => this.cyclePlaybackSpeed());
 
-    // Auto-scroll toggle
+    // Auto-scroll toggle / manual browsing reset
     this.btnToggleScroll.addEventListener("click", () => {
-      this.autoScrollEnabled = !this.autoScrollEnabled;
-      this.btnToggleScroll.classList.toggle("active", this.autoScrollEnabled);
-      this.statusHint.textContent = this.autoScrollEnabled ? "Auto-scroll ON" : "Auto-scroll OFF";
+      if (this.isUserBrowsing) {
+        this.isUserBrowsing = false;
+        this.autoScrollEnabled = true;
+        this.updateScrollButtonState();
+        if (this.activeSegmentIndex !== -1) {
+          this.scrollToSegment(this.activeSegmentIndex, true);
+          this.statusHint.textContent = `Auto-scroll ON (Top: § ${this.activeSegmentIndex + 1})`;
+        }
+      } else {
+        this.autoScrollEnabled = !this.autoScrollEnabled;
+        this.updateScrollButtonState();
+        this.statusHint.textContent = this.autoScrollEnabled ? "Auto-scroll ON" : "Auto-scroll OFF";
+        if (this.autoScrollEnabled && this.activeSegmentIndex !== -1) {
+          this.scrollToSegment(this.activeSegmentIndex, true);
+        }
+      }
+    });
+
+    // Detect user-initiated manual scrolling (wheel, touch, scrollbar drag, keys)
+    this.transcriptContainer.addEventListener("wheel", (e) => {
+      if (Math.abs(e.deltaY) > 2) this.onUserInitiatedScroll();
+    }, { passive: true });
+
+    this.transcriptContainer.addEventListener("touchmove", () => {
+      this.onUserInitiatedScroll();
+    }, { passive: true });
+
+    this.transcriptContainer.addEventListener("pointerdown", (e) => {
+      const rect = this.transcriptContainer.getBoundingClientRect();
+      if (e.clientX >= rect.right - 18) {
+        this.onUserInitiatedScroll();
+      }
+    });
+
+    this.transcriptContainer.addEventListener("keydown", (e) => {
+      if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Space"].includes(e.code)) {
+        this.onUserInitiatedScroll();
+      }
+    });
+
+    // Clicking status hint when browsing snaps back to playing paragraph
+    this.statusHint.addEventListener("click", () => {
+      if (this.isUserBrowsing && this.activeSegmentIndex !== -1) {
+        this.isUserBrowsing = false;
+        this.updateScrollButtonState();
+        this.scrollToSegment(this.activeSegmentIndex, true);
+        this.statusHint.textContent = `§ ${this.activeSegmentIndex + 1} playing`;
+      }
     });
 
     // URL Modal controls
@@ -228,8 +274,45 @@ class MiniLinguaFloatApp {
     }
   }
 
-  setActiveSegment(segIdx) {
-    if (segIdx === this.activeSegmentIndex) return;
+  onUserInitiatedScroll() {
+    if (!this.isUserBrowsing) {
+      this.isUserBrowsing = true;
+      this.updateScrollButtonState();
+      if (this.statusHint && this.activeSegmentIndex !== -1) {
+        this.statusHint.textContent = `Browsing • Click § to play from top`;
+      }
+    }
+  }
+
+  updateScrollButtonState() {
+    if (!this.btnToggleScroll) return;
+    this.btnToggleScroll.classList.toggle("active", this.autoScrollEnabled);
+    this.btnToggleScroll.classList.toggle("browsing", this.isUserBrowsing);
+    if (this.isUserBrowsing) {
+      this.btnToggleScroll.title = "Browsing manually - Click to snap back to playing paragraph";
+    } else {
+      this.btnToggleScroll.title = this.autoScrollEnabled ? "Auto-scroll ON (Top mode)" : "Auto-scroll OFF";
+    }
+  }
+
+  scrollToSegment(segIdx, smooth = true) {
+    if (segIdx < 0 || !this.parrafoDOMElements[segIdx]) return;
+    const el = this.parrafoDOMElements[segIdx];
+    const container = this.transcriptContainer;
+    if (!container) return;
+
+    const elRect = el.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const targetTop = container.scrollTop + (elRect.top - containerRect.top) - 8;
+
+    container.scrollTo({
+      top: Math.max(0, targetTop),
+      behavior: smooth ? "smooth" : "auto"
+    });
+  }
+
+  setActiveSegment(segIdx, forceScroll = false) {
+    if (segIdx === this.activeSegmentIndex && !forceScroll) return;
 
     if (this.activeSegmentIndex !== -1 && this.parrafoDOMElements[this.activeSegmentIndex]) {
       this.parrafoDOMElements[this.activeSegmentIndex].classList.remove("active-parrafo");
@@ -239,9 +322,10 @@ class MiniLinguaFloatApp {
       const parrafoEl = this.parrafoDOMElements[segIdx];
       parrafoEl.classList.add("active-parrafo");
 
-      // Smooth auto-scroll to keep active paragraph centered
-      if (this.autoScrollEnabled) {
-        parrafoEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      // By default, the playing paragraph sits at the top of the reproducer
+      // If user is manually browsing down, do not interrupt them unless forceScroll is true
+      if (this.autoScrollEnabled && (!this.isUserBrowsing || forceScroll)) {
+        this.scrollToSegment(segIdx, true);
       }
     }
 
@@ -280,6 +364,10 @@ class MiniLinguaFloatApp {
   clickParagraph(segIdx) {
     if (segIdx < 0 || segIdx >= this.segments.length) return;
 
+    // Reset manual browsing: clicking resumes top-aligned auto-follow from this paragraph
+    this.isUserBrowsing = false;
+    this.updateScrollButtonState();
+
     const targetStart = this.segments[segIdx].start;
 
     // 1. Immediately STOP the current section
@@ -291,8 +379,8 @@ class MiniLinguaFloatApp {
     }
     this.activeWordIndex = -1;
 
-    // 3. Highlight this paragraph immediately
-    this.setActiveSegment(segIdx);
+    // 3. Highlight this paragraph & scroll it directly to the top
+    this.setActiveSegment(segIdx, true);
 
     // 4. Seek playback position to the start of this paragraph
     this.seekTo(targetStart);
@@ -307,7 +395,7 @@ class MiniLinguaFloatApp {
     // 6. Start reproducing immediately
     this.play();
 
-    this.statusHint.textContent = `Replaying § ${segIdx + 1} (${this.formatTime(targetStart)})`;
+    this.statusHint.textContent = `§ ${segIdx + 1} (${this.formatTime(targetStart)})`;
   }
 
   stopCurrentPlayback() {
@@ -493,11 +581,13 @@ class MiniLinguaFloatApp {
       this.wordDOMElements.push(span);
     });
 
-    // Reset state to first paragraph
+    // Reset state to first paragraph at top
     this.activeWordIndex = -1;
     this.activeSegmentIndex = -1;
+    this.isUserBrowsing = false;
+    this.updateScrollButtonState();
     if (this.segments.length > 0) {
-      this.setActiveSegment(0);
+      this.setActiveSegment(0, true);
     }
   }
 
