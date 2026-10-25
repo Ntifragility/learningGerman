@@ -20,10 +20,19 @@
 
       <div class="header-right">
         <!-- Quick URL Input Button -->
-        <button id="btn-open-url-modal" class="btn-tool" title="Load YouTube URL">⚡ URL</button>
+        <button id="btn-open-url-modal" class="btn-tool" title="Load YouTube URL">⚡</button>
         
         <!-- Speed Cycle Button -->
         <button id="btn-cycle-speed" class="btn-tool" title="Playback Speed">1.0x</button>
+
+        <!-- Shadowing / Auto-Loop toggle -->
+        <button id="btn-cycle-loop" class="btn-tool" title="Loop Sentence: OFF / 1x / 2x / ∞">🔁</button>
+
+        <!-- Noun Gender Highlighting toggle (der=blue, die=red, das=green) -->
+        <button id="btn-toggle-gender" class="btn-tool active" title="Noun Genders (der=blue, die=red, das=green)">🎨</button>
+
+        <!-- Global Keyboard Shortcuts toggle (Space, R, Arrows) -->
+        <button id="btn-toggle-shortcuts" class="btn-tool active" title="Hotkeys: Space=Play, R=Replay, ↓/↑=Next/Prev">⌨️</button>
 
         <!-- Auto-scroll status indicator -->
         <button id="btn-toggle-scroll" class="btn-tool active" title="Auto-Scroll ON/OFF">📜</button>
@@ -31,8 +40,21 @@
         <!-- Saved Library & Local file load -->
         <button id="btn-open-library-modal" class="btn-tool" title="Saved Lessons & Local Files">📁</button>
         <input type="file" id="local-file-input" accept="audio/*,.json" multiple style="display: none;">
+
+        <!-- Ticker Mode toggle -->
+        <button id="btn-toggle-ticker" class="btn-tool" title="Ultra-Compact Ticker Mode (T)">⤢</button>
       </div>
     </header>
+
+    <!-- Ultra-compact Ticker Bar (Displayed in Ticker Mode) -->
+    <div id="ticker-bar" class="ticker-bar" style="display: none;">
+      <button id="btn-ticker-play" class="btn-play-mini" title="Play / Pause">▶</button>
+      <div id="ticker-text" class="ticker-text">
+        <span id="ticker-seg-badge" class="ticker-badge">§ 1</span>
+        <span id="ticker-words-mount" class="ticker-words-mount"></span>
+      </div>
+      <button id="btn-ticker-expand" class="btn-tool active" title="Expand Window (T)">⤢</button>
+    </div>
 
     <!-- Mini Player Bar (28px) -->
     <div class="mini-player-bar">

@@ -307,6 +307,94 @@ html, body {
   box-shadow: 0 0 8px var(--accent-gold-glow);
 }
 
+/* Noun Gender Highlighting (der=blue, die=red, das=green) */
+.genders-enabled .noun-m {
+  color: #93c5fd;
+  border-bottom: 1.5px solid #3b82f6;
+}
+.genders-enabled .noun-f {
+  color: #fca5a5;
+  border-bottom: 1.5px solid #ef4444;
+}
+.genders-enabled .noun-n {
+  color: #86efac;
+  border-bottom: 1.5px solid #10b981;
+}
+.genders-enabled .word.active.noun-m,
+.genders-enabled .word.active.noun-f,
+.genders-enabled .word.active.noun-n {
+  color: #000000;
+  border-bottom-color: transparent;
+}
+
+/* Loop / Shadowing Active Button */
+.btn-tool.looping {
+  color: #c084fc;
+  border-color: rgba(192, 132, 252, 0.5);
+  background: rgba(192, 132, 252, 0.15);
+  font-weight: 700;
+}
+
+/* Ultra-Compact Ticker Bar (36px mini strip) */
+.ticker-bar {
+  height: 36px;
+  width: 100vw;
+  background: rgba(15, 22, 36, 0.98);
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-active);
+  box-sizing: border-box;
+  overflow: hidden;
+  user-select: none;
+}
+
+.ticker-text {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.ticker-badge {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--accent-gold);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.ticker-words-mount {
+  font-size: 11px;
+  color: #cbd5e1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-app.ticker-active .mini-header,
+.mini-app.ticker-active .mini-player-bar,
+.mini-app.ticker-active .transcript-scroll {
+  display: none !important;
+}
+
+.mini-app.ticker-active {
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  overflow: hidden;
+}
+
+.mini-app.ticker-active #ticker-bar {
+  display: flex !important;
+}
+
 /* Quick URL Modal */
 .url-modal {
   position: absolute;

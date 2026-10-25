@@ -68,6 +68,21 @@ class TestLinguaFloatServer(unittest.TestCase):
             err_data = json.loads(e.read().decode("utf-8"))
             self.assertIn("error", err_data)
 
+    def test_transcribe_local_missing_data(self):
+        req = urllib.request.Request(
+            f"{self.base_url}/api/transcribe-local",
+            data=b"",
+            headers={"X-Filename": "test.mp3"},
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req) as response:
+                self.assertEqual(response.status, 400)
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+            err_data = json.loads(e.read().decode("utf-8"))
+            self.assertIn("error", err_data)
+
     def test_static_ui_serving(self):
         req = urllib.request.Request(f"{self.base_url}/index.html")
         with urllib.request.urlopen(req) as response:

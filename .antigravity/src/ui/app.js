@@ -50,6 +50,30 @@ class MiniLinguaFloatApp {
     this.libraryList = document.getElementById("library-list");
     this.btnBrowseLocal = document.getElementById("btn-browse-local");
 
+    // Feature 1: Noun Genders (der=blue, die=red, das=green)
+    this.gendersEnabled = true;
+    this.btnToggleGender = document.getElementById("btn-toggle-gender");
+
+    // Feature 3: Shadowing / Auto-Loop
+    this.loopModes = [0, 1, 2, Infinity];
+    this.loopModeIndex = 0;
+    this.currentSegmentRepeats = 0;
+    this.btnCycleLoop = document.getElementById("btn-cycle-loop");
+
+    // Feature 6: Global Shortcuts (with master ON/OFF toggle)
+    this.shortcutsEnabled = true;
+    this.btnToggleShortcuts = document.getElementById("btn-toggle-shortcuts");
+
+    // Feature 8: Ultra-Compact Ticker Mode
+    this.isTickerMode = false;
+    this.miniAppContainer = document.querySelector(".mini-app");
+    this.btnToggleTicker = document.getElementById("btn-toggle-ticker");
+    this.tickerBar = document.getElementById("ticker-bar");
+    this.btnTickerPlay = document.getElementById("btn-ticker-play");
+    this.btnTickerExpand = document.getElementById("btn-ticker-expand");
+    this.tickerSegBadge = document.getElementById("ticker-seg-badge");
+    this.tickerWordsMount = document.getElementById("ticker-words-mount");
+
     this.wordDOMElements = [];
     this.parrafoDOMElements = [];
 
@@ -168,6 +192,39 @@ class MiniLinguaFloatApp {
       });
     }
 
+    // Feature 1: Toggle Gender Highlighting
+    if (this.btnToggleGender) {
+      this.btnToggleGender.addEventListener("click", () => this.toggleGenderHighlighting());
+    }
+
+    // Feature 3: Cycle Loop / Shadowing Mode
+    if (this.btnCycleLoop) {
+      this.btnCycleLoop.addEventListener("click", () => this.cycleLoopMode());
+    }
+
+    // Feature 6: Toggle Shortcuts
+    if (this.btnToggleShortcuts) {
+      this.btnToggleShortcuts.addEventListener("click", () => {
+        this.shortcutsEnabled = !this.shortcutsEnabled;
+        this.btnToggleShortcuts.classList.toggle("active", this.shortcutsEnabled);
+        this.statusHint.textContent = this.shortcutsEnabled ? "Hotkeys ON (Space, R, Arrows)" : "Hotkeys OFF";
+      });
+    }
+
+    // Feature 8: Ticker Mode Controls
+    if (this.btnToggleTicker) {
+      this.btnToggleTicker.addEventListener("click", () => this.toggleTickerMode());
+    }
+    if (this.btnTickerExpand) {
+      this.btnTickerExpand.addEventListener("click", () => this.toggleTickerMode());
+    }
+    if (this.btnTickerPlay) {
+      this.btnTickerPlay.addEventListener("click", () => this.togglePlayPause());
+    }
+
+    // Global Keydown Hotkeys Dispatcher
+    window.addEventListener("keydown", (e) => this.handleGlobalKeyDown(e));
+
     // Audio element native listeners
     this.audio.addEventListener("play", () => {
       this.isPlaying = true;
@@ -249,6 +306,24 @@ class MiniLinguaFloatApp {
   syncStep(currentTime) {
     if (!this.words.length) return;
 
+    // Feature 3: Loop / Shadowing check at end of current paragraph
+    if (this.activeSegmentIndex !== -1 && this.loopModes[this.loopModeIndex] > 0) {
+      const curSeg = this.segments[this.activeSegmentIndex];
+      const maxLoops = this.loopModes[this.loopModeIndex];
+      if (curSeg && currentTime >= curSeg.end - 0.08 && currentTime <= curSeg.end + 0.3) {
+        if (this.currentSegmentRepeats < maxLoops) {
+          this.currentSegmentRepeats++;
+          this.seekTo(curSeg.start);
+          this.play();
+          const targetStr = maxLoops === Infinity ? "∞" : maxLoops;
+          this.statusHint.textContent = `§ ${this.activeSegmentIndex + 1} (Loop ${this.currentSegmentRepeats}/${targetStr})`;
+          return;
+        } else {
+          this.currentSegmentRepeats = 0;
+        }
+      }
+    }
+
     const newWordIndex = this.findWordAtTime(currentTime);
 
     if (newWordIndex !== this.activeWordIndex) {
@@ -266,6 +341,11 @@ class MiniLinguaFloatApp {
         const wordData = this.words[newWordIndex];
         const segIdx = wordData ? wordData.seg : -1;
         this.setActiveSegment(segIdx);
+
+        // Feature 8: Update ticker display if in ticker mode
+        if (this.isTickerMode) {
+          this.updateTickerDisplay(segIdx, newWordIndex);
+        }
       }
 
       this.activeWordIndex = newWordIndex;
@@ -389,6 +469,7 @@ class MiniLinguaFloatApp {
 
     // Reset manual browsing: clicking resumes top-aligned auto-follow from this paragraph
     this.isUserBrowsing = false;
+    this.currentSegmentRepeats = 0; // Reset loop counter on manual paragraph jump
     this.updateScrollButtonState();
 
     const targetStart = this.segments[segIdx].start;
@@ -588,6 +669,14 @@ class MiniLinguaFloatApp {
       span.dataset.id = wIdx;
       span.textContent = w.w;
 
+      // Feature 1: Classify noun gender (der/die/das)
+      const gender = this.classifyNounGender(w.w);
+      w.gender = gender;
+      if (gender) {
+        span.classList.add(`noun-${gender}`);
+        span.title = gender === "m" ? "der (Masculine)" : gender === "f" ? "die (Feminine)" : "das (Neuter)";
+      }
+
       // Clicking any word restarts both text and audio from the beginning of the paragraph
       span.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -608,7 +697,9 @@ class MiniLinguaFloatApp {
     this.activeWordIndex = -1;
     this.activeSegmentIndex = -1;
     this.isUserBrowsing = false;
+    this.currentSegmentRepeats = 0;
     this.updateScrollButtonState();
+    this.transcriptContainer.classList.toggle("genders-enabled", this.gendersEnabled);
     if (this.segments.length > 0) {
       this.setActiveSegment(0, true);
     }
@@ -882,7 +973,17 @@ class MiniLinguaFloatApp {
         console.warn("No companion transcript on server:", err);
       }
 
-      this.statusHint.textContent = "Audio loaded • Select matching .json or load URL";
+      this.statusHint.textContent = "Audio loaded • Checking for transcript...";
+
+      // If no companion transcript on server, prompt user to transcribe with Whisper AI
+      setTimeout(async () => {
+        const doTranscribe = confirm(`"${audioFile.name}" does not have a transcript yet.\n\nTranscribe with Whisper AI to generate synchronized word-level German text?`);
+        if (doTranscribe) {
+          await this.uploadAndTranscribeLocal(audioFile);
+        } else {
+          this.statusHint.textContent = "Audio loaded (no text)";
+        }
+      }, 100);
     }
   }
 
@@ -994,6 +1095,233 @@ class MiniLinguaFloatApp {
     };
 
     this.renderTranscript(demo);
+  }
+
+  async uploadAndTranscribeLocal(file) {
+    this.showLoader("Transcribing Audio", `Running Whisper AI on ${file.name}...`);
+    this.setLoaderProgress(10, "Uploading local file to engine...");
+
+    let simulatedPct = 10;
+    this.loaderInterval = setInterval(() => {
+      if (simulatedPct < 40) {
+        simulatedPct += 4;
+        this.setLoaderProgress(simulatedPct, "Uploading audio stream...");
+      } else if (simulatedPct < 85) {
+        simulatedPct += 1.5;
+        this.setLoaderProgress(simulatedPct, "Whisper AI transcribing German words & VAD...");
+      } else if (simulatedPct < 96) {
+        simulatedPct += 0.5;
+        this.setLoaderProgress(simulatedPct, "Aligning word timestamps...");
+      }
+    }, 450);
+
+    try {
+      const res = await fetch("/api/transcribe-local", {
+        method: "POST",
+        headers: {
+          "X-Filename": encodeURIComponent(file.name),
+          "Content-Type": file.type || "application/octet-stream"
+        },
+        body: file
+      });
+
+      if (!res.ok) throw new Error("Local transcription failed on server");
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      clearInterval(this.loaderInterval);
+      this.setLoaderProgress(100, "Done! Interactive script ready.");
+
+      setTimeout(() => {
+        this.hideLoader();
+        if (data.transcript) {
+          this.headerTitle.textContent = data.title || file.name;
+          this.renderTranscript(data.transcript);
+          if (data.audio_url) {
+            this.activePlayerType = "audio";
+            this.audio.src = data.audio_url;
+            this.audio.load();
+          }
+          this.statusHint.textContent = "Ready • Click paragraph to play";
+          this.play();
+        }
+      }, 500);
+    } catch (err) {
+      clearInterval(this.loaderInterval);
+      console.warn("Transcribe error:", err);
+      this.setLoaderProgress(0, "Error transcribing audio");
+      this.loaderTitle.textContent = "Transcription Failed";
+      this.statusHint.textContent = "Error: Check terminal";
+      setTimeout(() => this.hideLoader(), 2500);
+    }
+  }
+
+  classifyNounGender(rawWord) {
+    if (!rawWord) return null;
+    const clean = rawWord.replace(/^[„“"'\(\[\{]+|[.,!?:;"'\)\]\}]+$/g, "");
+    if (!clean || clean.length < 2) return null;
+
+    // German nouns are capitalized
+    if (!/^[A-ZÄÖÜ]/.test(clean)) return null;
+
+    const lower = clean.toLowerCase();
+
+    // 1. Suffix rules (High precision in German grammar)
+    if (/(ung|heit|keit|schaft|tion|sion|tät|ik|ie|enz|anz|ur)$/.test(lower)) {
+      return "f";
+    }
+    if (/(ling|ismus|ist|ant|ent|eur|iker|or)$/.test(lower)) {
+      return "m";
+    }
+    if (/(chen|lein|ment|um|ma|tum)$/.test(lower)) {
+      return "n";
+    }
+
+    // 2. High-frequency irregular core nouns dictionary
+    const MASC_NOUNS = new Set([
+      "mann", "tag", "name", "tisch", "vater", "junge", "sohn", "freund", "hund",
+      "baum", "weg", "stuhl", "morgen", "abend", "monat", "kaffee", "tee", "apfel",
+      "lehrer", "kopf", "arm", "fuß", "satz", "arzt", "herbst", "sommer", "winter",
+      "frühling", "berg", "ort", "schüler", "bruder", "onkel", "kollege", "chef"
+    ]);
+
+    const FEM_NOUNS = new Set([
+      "frau", "mutter", "zeit", "hand", "nacht", "stadt", "sprache", "schule",
+      "frage", "musik", "tür", "sonne", "straße", "katze", "tasche", "blume",
+      "welt", "schwester", "tochter", "küche", "wohnung", "ärztin", "lehrerin",
+      "stunde", "woche", "seite", "minuten", "antwort", "idee", "nummer", "familie"
+    ]);
+
+    const NEUT_NOUNS = new Set([
+      "kind", "haus", "auto", "buch", "wasser", "bild", "fenster", "wort",
+      "jahr", "auge", "land", "brot", "geld", "zimmer", "spiel", "essen",
+      "mädchen", "problem", "beispiel", "ende", "glas", "hotel", "bett",
+      "leben", "ziel", "thema", "deutsch", "herz", "wetter"
+    ]);
+
+    if (MASC_NOUNS.has(lower)) return "m";
+    if (FEM_NOUNS.has(lower)) return "f";
+    if (NEUT_NOUNS.has(lower)) return "n";
+
+    return null;
+  }
+
+  toggleGenderHighlighting() {
+    this.gendersEnabled = !this.gendersEnabled;
+    if (this.btnToggleGender) {
+      this.btnToggleGender.classList.toggle("active", this.gendersEnabled);
+    }
+    if (this.transcriptContainer) {
+      this.transcriptContainer.classList.toggle("genders-enabled", this.gendersEnabled);
+    }
+    this.statusHint.textContent = this.gendersEnabled ? "Genders ON (🔵/🔴/🟢)" : "Genders OFF";
+  }
+
+  cycleLoopMode() {
+    this.loopModeIndex = (this.loopModeIndex + 1) % this.loopModes.length;
+    const mode = this.loopModes[this.loopModeIndex];
+    this.currentSegmentRepeats = 0;
+
+    if (this.btnCycleLoop) {
+      this.btnCycleLoop.classList.toggle("looping", mode > 0);
+      if (mode === 0) {
+        this.btnCycleLoop.textContent = "🔁";
+        this.statusHint.textContent = "Loop §: OFF";
+      } else if (mode === Infinity) {
+        this.btnCycleLoop.textContent = "🔁 ∞";
+        this.statusHint.textContent = "Loop §: Infinite (Shadowing)";
+      } else {
+        this.btnCycleLoop.textContent = `🔁 ${mode}x`;
+        this.statusHint.textContent = `Loop §: Repeat ${mode}x`;
+      }
+    }
+  }
+
+  toggleTickerMode() {
+    this.isTickerMode = !this.isTickerMode;
+    if (this.miniAppContainer) {
+      this.miniAppContainer.classList.toggle("ticker-active", this.isTickerMode);
+    }
+    if (this.btnToggleTicker) {
+      this.btnToggleTicker.classList.toggle("active", this.isTickerMode);
+      this.btnToggleTicker.textContent = this.isTickerMode ? "⤡" : "⤢";
+    }
+
+    try {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.resize_window === "function") {
+        window.pywebview.api.resize_window(340, this.isTickerMode ? 48 : 270);
+      }
+    } catch (e) {
+      console.warn("Resize error:", e);
+    }
+
+    if (this.isTickerMode && this.activeSegmentIndex !== -1) {
+      this.updateTickerDisplay(this.activeSegmentIndex, this.activeWordIndex);
+    }
+
+    this.statusHint.textContent = this.isTickerMode ? "Ticker Mode (36px)" : "Full Mode (270px)";
+  }
+
+  updateTickerDisplay(segIdx, wordIdx) {
+    if (!this.tickerWordsMount || segIdx < 0 || segIdx >= this.segments.length) return;
+    if (this.tickerSegBadge) {
+      this.tickerSegBadge.textContent = `§ ${segIdx + 1}`;
+    }
+
+    const segWords = this.words.filter((w) => w.seg === segIdx);
+    this.tickerWordsMount.innerHTML = "";
+    segWords.forEach((w) => {
+      const span = document.createElement("span");
+      span.className = "word";
+      if (this.gendersEnabled && w.gender) {
+        span.classList.add(`noun-${w.gender}`);
+      }
+      if (w.id === wordIdx) {
+        span.classList.add("active");
+      }
+      span.textContent = w.w;
+      this.tickerWordsMount.appendChild(span);
+      this.tickerWordsMount.appendChild(document.createTextNode(" "));
+    });
+  }
+
+  handleGlobalKeyDown(e) {
+    if (!this.shortcutsEnabled) return;
+
+    // Ignore if typing in input or textarea
+    if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+
+    // Ignore if modal is visible
+    if ((this.urlModal && this.urlModal.style.display === "flex") ||
+        (this.libraryModal && this.libraryModal.style.display === "flex")) {
+      return;
+    }
+
+    if (e.code === "Space") {
+      e.preventDefault();
+      this.togglePlayPause();
+    } else if (e.code === "KeyR") {
+      e.preventDefault();
+      if (this.activeSegmentIndex !== -1) {
+        this.clickParagraph(this.activeSegmentIndex);
+      }
+    } else if (e.code === "ArrowDown" || e.code === "KeyJ") {
+      e.preventDefault();
+      if (this.activeSegmentIndex < this.segments.length - 1) {
+        this.clickParagraph(this.activeSegmentIndex + 1);
+      }
+    } else if (e.code === "ArrowUp" || e.code === "KeyK") {
+      e.preventDefault();
+      if (this.activeSegmentIndex > 0) {
+        this.clickParagraph(this.activeSegmentIndex - 1);
+      }
+    } else if (e.code === "BracketRight") {
+      e.preventDefault();
+      this.cyclePlaybackSpeed();
+    } else if (e.code === "KeyT") {
+      e.preventDefault();
+      this.toggleTickerMode();
+    }
   }
 
   formatTime(sec) {

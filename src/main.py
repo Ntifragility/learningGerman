@@ -104,6 +104,49 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"error": str(e)}, status=500)
             return
 
+        elif self.path == "/api/transcribe-local":
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length <= 0:
+                self.send_json_response({"error": "No audio data provided"}, status=400)
+                return
+
+            raw_filename = self.headers.get("X-Filename", "audio.mp3")
+            safe_filename = urllib.parse.unquote(raw_filename).replace(" ", "_")
+            safe_filename = "".join(c for c in safe_filename if c.isalnum() or c in "._-")
+            if not safe_filename:
+                safe_filename = "local_audio.mp3"
+
+            audio_dest = DOWNLOADS_DIR / safe_filename
+            stem = audio_dest.stem
+            json_dest = DOWNLOADS_DIR / f"{stem}_transcript.json"
+
+            try:
+                print(f"[LinguaFloat] Receiving & transcribing local audio: {safe_filename} ({content_length} bytes)")
+                with open(audio_dest, "wb") as f:
+                    remaining = content_length
+                    chunk_size = 64 * 1024
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(remaining, chunk_size))
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        remaining -= len(chunk)
+
+                aligner = TranscriptAligner(model_size="base", device="cpu", compute_type="int8")
+                transcript = aligner.process_audio(audio_dest, output_json=json_dest, language="de")
+
+                self.send_json_response({
+                    "success": True,
+                    "title": safe_filename,
+                    "audio_url": f"/downloads/{safe_filename}",
+                    "transcript": transcript
+                })
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.send_json_response({"error": str(e)}, status=500)
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -175,6 +218,17 @@ def main():
         print(f"  * Always On Top: True")
         print("=" * 60 + "\n")
 
+        class DesktopBridge:
+            def resize_window(self, width, height):
+                try:
+                    if window:
+                        window.resize(int(width), int(height))
+                    return True
+                except Exception:
+                    return False
+
+        bridge = DesktopBridge()
+
         window = webview.create_window(
             title="LinguaFloat DE",
             url=url,
@@ -185,7 +239,8 @@ def main():
             on_top=True,      # Floating Always on Top!
             resizable=True,
             frameless=False,
-            easy_drag=True
+            easy_drag=True,
+            js_api=bridge
         )
         webview.start()
 
