@@ -1,0 +1,55 @@
+body {
+    margin: 0;
+    padding: 12px;
+    background-color: #121214;
+    color: #d1d5db;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    box-sizing: border-box;
+}
+
+#audio-player {
+    width: 100%;
+    height: 36px;
+    margin-bottom: 10px;
+    outline: none;
+}
+
+#transcript-container {
+    flex: 1;
+    overflow-y: auto;
+    line-height: 1.8;
+    font-size: 15px;
+    padding-right: 6px;
+}
+
+/* Custom minimal scrollbar */
+#transcript-container::-webkit-scrollbar {
+    width: 4px;
+}
+
+#transcript-container::-webkit-scrollbar-thumb {
+    background: #374151;
+    border-radius: 4px;
+}
+
+.word {
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 4px;
+    transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.word:hover {
+    background-color: #27272a;
+    color: #ffffff;
+}
+
+.word.active {
+    background-color: #f59e0b;
+    color: #000000;
+    font-weight: 600;
+}

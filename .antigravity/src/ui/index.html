@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LinguaFloat DE</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Ultra-Compact Widget Container -->
+  <div class="mini-app">
+
+    <!-- Top Mini Toolbar (28px) -->
+    <header class="mini-header">
+      <div class="header-left">
+        <span class="badge-de">DE</span>
+        <span id="header-title" class="header-title">LinguaFloat</span>
+      </div>
+
+      <div class="header-right">
+        <!-- Quick URL Input Button -->
+        <button id="btn-open-url-modal" class="btn-tool" title="Load YouTube URL">⚡ URL</button>
+        
+        <!-- Speed Cycle Button -->
+        <button id="btn-cycle-speed" class="btn-tool" title="Playback Speed">1.0x</button>
+
+        <!-- Auto-scroll status indicator -->
+        <button id="btn-toggle-scroll" class="btn-tool active" title="Auto-Scroll ON/OFF">📜</button>
+
+        <!-- Local file load -->
+        <label class="btn-tool" title="Open local audio/json">
+          📁
+          <input type="file" id="local-file-input" accept="audio/*,.json" style="display: none;">
+        </label>
+      </div>
+    </header>
+
+    <!-- Mini Player Bar (28px) -->
+    <div class="mini-player-bar">
+      <button id="btn-play-pause" class="btn-play-mini" title="Play / Pause">▶</button>
+      
+      <div class="time-and-progress">
+        <div class="time-row">
+          <span id="time-display" class="time-text">0:00 / 0:00</span>
+          <span id="status-hint" class="status-hint">Click paragraph to replay</span>
+        </div>
+        <div id="progress-container" class="progress-container">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- YouTube Hidden / Mini Player Mount -->
+    <div id="yt-player-container" class="yt-container" style="display: none;">
+      <div id="yt-player"></div>
+    </div>
+
+    <!-- HTML5 Audio Element for Local / Streamed Audio -->
+    <audio id="audio-engine" preload="auto" style="display: none;"></audio>
+
+    <!-- Main Paragraphs Scroll Area -->
+    <main id="transcript-container" class="transcript-scroll">
+      <!-- Injected dynamically as .parrafo elements -->
+    </main>
+
+    <!-- Quick URL Modal / Dropdown -->
+    <div id="url-modal" class="url-modal" style="display: none;">
+      <div class="url-modal-content">
+        <input 
+          type="text" 
+          id="yt-url-input" 
+          class="url-input" 
+          placeholder="Paste YouTube Link..."
+        />
+        <div class="modal-buttons">
+          <button id="btn-submit-url" class="btn-modal-primary">Load</button>
+          <button id="btn-close-modal" class="btn-modal-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
