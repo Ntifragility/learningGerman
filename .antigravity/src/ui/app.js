@@ -11,7 +11,7 @@ class MiniLinguaFloatApp {
     this.activeSegmentIndex = -1;
     this.autoScrollEnabled = true;
     this.isPlaying = false;
-    this.activePlayerType = "audio"; // "yt" | "audio" | "clock"
+    this.activePlayerType = "clock"; // Default to "clock" until audio/yt loaded
     this.ytPlayer = null;
     this.ytReady = false;
     this.speeds = [0.75, 1.0, 1.25, 1.5];
@@ -20,7 +20,7 @@ class MiniLinguaFloatApp {
     // Synthetic clock for demo playback
     this.clockStartPerf = 0;
     this.clockOffsetSec = 0;
-    this.clockDurationSec = 18.0;
+    this.clockDurationSec = 16.5;
 
     // DOM Elements
     this.audio = document.getElementById("audio-engine");
@@ -143,7 +143,7 @@ class MiniLinguaFloatApp {
     } else {
       // Clock / Demo mode
       if (this.isPlaying) {
-        const elapsed = (performance.now() - this.clockStartPerf) / 1000 * this.speeds[this.speedIndex];
+        const elapsed = ((performance.now() - this.clockStartPerf) / 1000) * this.speeds[this.speedIndex];
         const t = this.clockOffsetSec + elapsed;
         if (t >= this.clockDurationSec) {
           this.pause();
@@ -162,7 +162,7 @@ class MiniLinguaFloatApp {
       } catch (e) {
         return 0;
       }
-    } else if (this.activePlayerType === "audio" && this.audio && this.audio.duration) {
+    } else if (this.activePlayerType === "audio" && this.audio && this.audio.src && this.audio.duration) {
       return this.audio.duration;
     }
     return this.clockDurationSec;
@@ -192,6 +192,31 @@ class MiniLinguaFloatApp {
       }
 
       this.activeWordIndex = newWordIndex;
+    }
+  }
+
+  syncWordByCharIndex(segId, charIndex) {
+    const segWords = this.words.filter((w) => w.seg === segId);
+    if (!segWords.length) return;
+
+    let currentPos = 0;
+    for (let i = 0; i < segWords.length; i++) {
+      const w = segWords[i];
+      const wordLen = w.w.length;
+      if (charIndex >= currentPos && charIndex <= currentPos + wordLen + 1) {
+        const globalIdx = w.id;
+        if (globalIdx !== this.activeWordIndex) {
+          if (this.activeWordIndex !== -1 && this.wordDOMElements[this.activeWordIndex]) {
+            this.wordDOMElements[this.activeWordIndex].classList.remove("active");
+          }
+          if (this.wordDOMElements[globalIdx]) {
+            this.wordDOMElements[globalIdx].classList.add("active");
+          }
+          this.activeWordIndex = globalIdx;
+        }
+        break;
+      }
+      currentPos += wordLen + 1;
     }
   }
 
@@ -231,7 +256,7 @@ class MiniLinguaFloatApp {
       }
     }
 
-    // Near-match gap tolerance (e.g. 0.2s pause between words)
+    // Near-match gap tolerance (e.g. 0.25s pause between words)
     if (high >= 0 && high < this.words.length) {
       if (t >= this.words[high].s && t <= this.words[high].e + 0.25) {
         return high;
@@ -241,8 +266,8 @@ class MiniLinguaFloatApp {
   }
 
   /**
-   * CRITICAL FEATURE 3:
-   * "The reproductor must stop the current section and start reproducing every time i click a parrafo"
+   * REPLAY PARAGRAPH
+   * Stops current section, jumps to paragraph start, highlights and reproduces immediately
    */
   clickParagraph(segIdx) {
     if (segIdx < 0 || segIdx >= this.segments.length) return;
@@ -252,23 +277,36 @@ class MiniLinguaFloatApp {
     // 1. Immediately STOP the current section
     this.stopCurrentPlayback();
 
-    // 2. Jump playback head to the exact start of this clicked paragraph
-    this.seekTo(targetStart);
+    // 2. Clear old word highlight
+    if (this.activeWordIndex !== -1 && this.wordDOMElements[this.activeWordIndex]) {
+      this.wordDOMElements[this.activeWordIndex].classList.remove("active");
+    }
+    this.activeWordIndex = -1;
 
     // 3. Highlight this paragraph immediately
     this.setActiveSegment(segIdx);
 
-    // 4. Start reproducing immediately
+    // 4. Seek playback position to the start of this paragraph
+    this.seekTo(targetStart);
+
+    // 5. Highlight first word of this paragraph immediately
+    const firstWord = this.words.find((w) => w.seg === segIdx);
+    if (firstWord && this.wordDOMElements[firstWord.id]) {
+      this.wordDOMElements[firstWord.id].classList.add("active");
+      this.activeWordIndex = firstWord.id;
+    }
+
+    // 6. Start reproducing immediately
     this.play();
 
-    this.statusHint.textContent = `Replaying paragraph #${segIdx + 1} (${this.formatTime(targetStart)})`;
+    this.statusHint.textContent = `Replaying § ${segIdx + 1} (${this.formatTime(targetStart)})`;
   }
 
   stopCurrentPlayback() {
     if (this.activePlayerType === "yt" && this.ytPlayer) {
       try { this.ytPlayer.pauseVideo(); } catch (e) {}
-    } else if (this.activePlayerType === "audio") {
-      this.audio.pause();
+    } else if (this.activePlayerType === "audio" && this.audio && this.audio.src) {
+      try { this.audio.pause(); } catch (e) {}
     } else {
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
@@ -280,13 +318,16 @@ class MiniLinguaFloatApp {
   seekTo(seconds) {
     seconds = Math.max(0, seconds);
 
-    if (this.activePlayerType === "yt" && this.ytPlayer) {
+    if (this.activePlayerType === "yt" && this.ytPlayer && typeof this.ytPlayer.seekTo === "function") {
       try {
         this.ytPlayer.seekTo(seconds, true);
       } catch (e) {}
-    } else if (this.activePlayerType === "audio" && this.audio) {
-      this.audio.currentTime = seconds;
+    } else if (this.activePlayerType === "audio" && this.audio && this.audio.src) {
+      try {
+        this.audio.currentTime = seconds;
+      } catch (e) {}
     } else {
+      // Clock / Demo mode
       this.clockOffsetSec = seconds;
       this.clockStartPerf = performance.now();
     }
@@ -296,21 +337,37 @@ class MiniLinguaFloatApp {
     this.isPlaying = true;
     this.btnPlayPause.textContent = "⏸";
 
-    if (this.activePlayerType === "yt" && this.ytPlayer) {
+    if (this.activePlayerType === "yt" && this.ytPlayer && typeof this.ytPlayer.playVideo === "function") {
       try { this.ytPlayer.playVideo(); } catch (e) {}
-    } else if (this.activePlayerType === "audio" && this.audio.src) {
+    } else if (this.activePlayerType === "audio" && this.audio && this.audio.src) {
       this.audio.play().catch(() => {});
     } else {
-      // Clock / Demo mode
+      // Clock / Demo mode with Web Speech
       this.clockStartPerf = performance.now();
+
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
-        // Speak active paragraph or rest of text
-        const activeSeg = this.segments[this.activeSegmentIndex] || this.segments[0];
+
+        const segIdx = this.activeSegmentIndex >= 0 ? this.activeSegmentIndex : 0;
+        const activeSeg = this.segments[segIdx];
+
         if (activeSeg) {
           const utterance = new SpeechSynthesisUtterance(activeSeg.text);
           utterance.lang = "de-DE";
           utterance.rate = this.speeds[this.speedIndex];
+
+          // Synchronize word boundaries during speech
+          utterance.onboundary = (event) => {
+            if (event.name === "word") {
+              this.syncWordByCharIndex(segIdx, event.charIndex);
+            }
+          };
+
+          utterance.onend = () => {
+            this.pause();
+            this.statusHint.textContent = `Finished § ${segIdx + 1} • Click to replay`;
+          };
+
           window.speechSynthesis.speak(utterance);
         }
       }
@@ -335,7 +392,9 @@ class MiniLinguaFloatApp {
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const total = this.getTotalDuration();
     if (total > 0) {
-      this.seekTo(ratio * total);
+      const targetTime = ratio * total;
+      this.seekTo(targetTime);
+      this.syncStep(targetTime);
     }
   }
 
@@ -344,7 +403,7 @@ class MiniLinguaFloatApp {
     const speed = this.speeds[this.speedIndex];
     this.btnCycleSpeed.textContent = `${speed}x`;
 
-    if (this.audio) this.audio.playbackRate = speed;
+    if (this.audio && this.audio.src) this.audio.playbackRate = speed;
     if (this.ytPlayer && typeof this.ytPlayer.setPlaybackRate === "function") {
       this.ytPlayer.setPlaybackRate(speed);
     }
@@ -403,6 +462,8 @@ class MiniLinguaFloatApp {
 
     // Populate words into their respective paragraphs
     this.words.forEach((w, wIdx) => {
+      w.id = wIdx; // Ensure unambiguous id
+
       const span = document.createElement("span");
       span.className = "word";
       span.dataset.id = wIdx;
@@ -412,8 +473,15 @@ class MiniLinguaFloatApp {
       span.addEventListener("click", (e) => {
         e.stopPropagation(); // Stop paragraph click to prioritize exact word
         this.stopCurrentPlayback();
-        this.seekTo(w.s);
+
+        if (this.activeWordIndex !== -1 && this.wordDOMElements[this.activeWordIndex]) {
+          this.wordDOMElements[this.activeWordIndex].classList.remove("active");
+        }
+
+        this.activeWordIndex = wIdx;
+        span.classList.add("active");
         this.setActiveSegment(w.seg);
+        this.seekTo(w.s);
         this.play();
       });
 
@@ -426,6 +494,13 @@ class MiniLinguaFloatApp {
 
       this.wordDOMElements.push(span);
     });
+
+    // Reset state to first paragraph
+    this.activeWordIndex = -1;
+    this.activeSegmentIndex = -1;
+    if (this.segments.length > 0) {
+      this.setActiveSegment(0);
+    }
   }
 
   async processYouTubeUrl() {
@@ -524,6 +599,9 @@ class MiniLinguaFloatApp {
   }
 
   loadInitialDemo() {
+    this.activePlayerType = "clock";
+    this.clockOffsetSec = 0;
+
     const demo = {
       meta: {
         audio_file: "Deutsch_A1_GutenMorgen",
