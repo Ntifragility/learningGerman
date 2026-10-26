@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
+import urllib.request
 
 # Path Setup
 FILE_PATH = Path(__file__).resolve()
@@ -24,6 +25,51 @@ try:
     from src.engine.aligner import TranscriptAligner, download_youtube_audio, get_youtube_transcript_or_audio
 except ImportError:
     from engine.aligner import TranscriptAligner, download_youtube_audio, get_youtube_transcript_or_audio
+
+TRANSLATION_CACHE = {}
+
+
+def translate_text(text: str) -> str:
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+    if cleaned in TRANSLATION_CACHE:
+        return TRANSLATION_CACHE[cleaned]
+
+    # Primary translation: Google Translate single API (with retry)
+    for attempt in range(2):
+        try:
+            q = urllib.parse.quote(cleaned)
+            url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=de&tl=en&dt=t&q={q}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                parts = [part[0] for part in data[0] if part and part[0]]
+                translated = "".join(parts).strip()
+                if translated and translated.lower() != cleaned.lower():
+                    TRANSLATION_CACHE[cleaned] = translated
+                    return translated
+        except Exception as e:
+            if attempt == 1:
+                print(f"[Translation] Google gtx error for '{cleaned[:25]}...': {e}")
+
+    # Fallback translation: MyMemory API
+    for attempt in range(2):
+        try:
+            q = urllib.parse.quote(cleaned)
+            url = f"https://api.mymemory.translated.net/get?q={q}&langpair=de|en"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                matches = data.get("responseData", {}).get("translatedText", "")
+                if matches and matches.strip() and matches.lower() != cleaned.lower():
+                    TRANSLATION_CACHE[cleaned] = matches.strip()
+                    return matches.strip()
+        except Exception as e:
+            if attempt == 1:
+                print(f"[Translation] MyMemory fallback error: {e}")
+
+    return cleaned
 
 
 class LinguaFloatHandler(SimpleHTTPRequestHandler):
@@ -361,6 +407,72 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
                 traceback.print_exc()
                 self.send_json_response({"error": str(e)}, status=500)
             return
+
+        elif self.path == "/api/translate":
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length <= 0:
+                self.send_json_response({"error": "Missing request body"}, status=400)
+                return
+
+            body = self.rfile.read(content_length).decode("utf-8")
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_json_response({"error": "Invalid JSON body"}, status=400)
+                return
+
+            text = data.get("text")
+            texts = data.get("texts")
+            lesson_id = data.get("lesson_id")
+
+            if text is None and not texts:
+                self.send_json_response({"error": "Must provide 'text' or 'texts' to translate"}, status=400)
+                return
+
+            try:
+                if text is not None:
+                    translated = translate_text(str(text))
+                    self.send_json_response({"success": True, "original": text, "translated": translated})
+                    return
+
+                if texts:
+                    import concurrent.futures
+                    # Translate in parallel up to 6 workers for ultra fast batch response
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+                        translations = list(executor.map(translate_text, texts))
+
+                    # If lesson_id provided, persist translations directly to the transcript file
+                    if lesson_id:
+                        stem = lesson_id.replace("_transcript", "")
+                        cand_json = DOWNLOADS_DIR / f"{stem}_transcript.json"
+                        if not cand_json.exists():
+                            cand_json = DOWNLOADS_DIR / f"{stem}.json"
+
+                        if cand_json.exists():
+                            try:
+                                with open(cand_json, "r", encoding="utf-8") as f:
+                                    tdata = json.load(f)
+                                segs = tdata.get("segments", [])
+                                for idx, tr in enumerate(translations):
+                                    if idx < len(segs):
+                                        segs[idx]["translation"] = tr
+                                with open(cand_json, "w", encoding="utf-8") as f:
+                                    json.dump(tdata, f, ensure_ascii=False, indent=2)
+                                print(f"[LinguaFloat] Persisted {len(translations)} translations into {cand_json.name}")
+                            except Exception as fe:
+                                print(f"[LinguaFloat] Note: Could not cache translations to file: {fe}")
+
+                    self.send_json_response({
+                        "success": True,
+                        "count": len(translations),
+                        "translations": translations
+                    })
+                    return
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.send_json_response({"error": str(e)}, status=500)
+                return
 
         self.send_response(404)
         self.end_headers()

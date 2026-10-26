@@ -51,6 +51,26 @@ class MiniLinguaFloatApp {
     this.libraryList = document.getElementById("library-list");
     this.btnBrowseLocal = document.getElementById("btn-browse-local");
 
+    // English Translation Feature (Show/Hide English subtitles)
+    this.translationEnabled = false;
+    this.btnToggleTranslation = document.getElementById("btn-toggle-translation");
+    this.isTranslatingBatch = false;
+
+    // In-App Rename Modal Elements
+    this.renameModal = document.getElementById("rename-modal");
+    this.renameInput = document.getElementById("rename-input");
+    this.renameError = document.getElementById("rename-error");
+    this.btnConfirmRename = document.getElementById("btn-confirm-rename");
+    this.btnCancelRename = document.getElementById("btn-cancel-rename");
+    this.btnCloseRename = document.getElementById("btn-close-rename");
+    this.pendingRenameItem = null;
+
+    // Floating Selected Expression Popover
+    this.expressionPopover = document.getElementById("expression-popover");
+    this.popoverDeText = document.getElementById("popover-de-text");
+    this.popoverEnText = document.getElementById("popover-en-text");
+    this.btnClosePopover = document.getElementById("btn-close-popover");
+
     // Feature 1: Noun Genders (der=blue, die=red, das=green)
     this.gendersEnabled = true;
     this.btnToggleGender = document.getElementById("btn-toggle-gender");
@@ -59,6 +79,8 @@ class MiniLinguaFloatApp {
     this.loopModes = [0, 1, 2, Infinity];
     this.loopModeIndex = 0;
     this.currentSegmentRepeats = 0;
+    this.lastLoopSeekTime = 0;
+    this.bgWorker = null;
     this.btnCycleLoop = document.getElementById("btn-cycle-loop");
 
     // Multi-Paragraph Range Loop (A-B)
@@ -230,6 +252,41 @@ class MiniLinguaFloatApp {
       this.btnToggleGender.addEventListener("click", () => this.toggleGenderHighlighting());
     }
 
+    // English Translation toggle (Show / Hide English)
+    if (this.btnToggleTranslation) {
+      this.btnToggleTranslation.addEventListener("click", () => this.toggleTranslation());
+    }
+
+    // In-App Rename Modal listeners
+    if (this.btnConfirmRename) {
+      this.btnConfirmRename.addEventListener("click", () => this.confirmRenameLesson());
+    }
+    if (this.btnCancelRename) {
+      this.btnCancelRename.addEventListener("click", () => this.closeRenameModal());
+    }
+    if (this.btnCloseRename) {
+      this.btnCloseRename.addEventListener("click", () => this.closeRenameModal());
+    }
+    if (this.renameInput) {
+      this.renameInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") this.confirmRenameLesson();
+        if (e.key === "Escape") this.closeRenameModal();
+      });
+    }
+
+    // Expression translation on text selection
+    this.transcriptContainer.addEventListener("mouseup", () => this.handleTextSelection());
+    if (this.btnClosePopover) {
+      this.btnClosePopover.addEventListener("click", () => this.hideExpressionPopover());
+    }
+    document.addEventListener("mousedown", (e) => {
+      if (this.expressionPopover && this.expressionPopover.style.display !== "none") {
+        if (!this.expressionPopover.contains(e.target)) {
+          this.hideExpressionPopover();
+        }
+      }
+    });
+
     // Feature 3: Cycle Loop / Shadowing Mode
     if (this.btnCycleLoop) {
       this.btnCycleLoop.addEventListener("click", () => this.cycleLoopMode());
@@ -292,18 +349,74 @@ class MiniLinguaFloatApp {
 
   // Continuous sync loop that checks whatever player is currently active
   startGlobalSyncLoop() {
-    const tick = () => {
-      let currentTime = this.getCurrentPlaybackTime();
-      let totalDuration = this.getTotalDuration();
+    const onTick = () => {
+      const currentTime = this.getCurrentPlaybackTime();
+      const totalDuration = this.getTotalDuration();
 
       if (this.isPlaying) {
         this.syncStep(currentTime);
       }
 
-      this.updateProgressUI(currentTime, totalDuration);
-      requestAnimationFrame(tick);
+      if (!document.hidden) {
+        this.updateProgressUI(currentTime, totalDuration);
+      }
     };
-    requestAnimationFrame(tick);
+
+    // 1. requestAnimationFrame for 60fps UI when window is visible
+    const rafTick = () => {
+      if (!document.hidden) {
+        onTick();
+      }
+      requestAnimationFrame(rafTick);
+    };
+    requestAnimationFrame(rafTick);
+
+    // 2. High-precision Web Worker timer (NEVER throttled or paused when minimized)
+    try {
+      const blobCode = `
+        let timer = null;
+        self.onmessage = function(e) {
+          if (e.data === 'start') {
+            if (!timer) timer = setInterval(() => self.postMessage('tick'), 30);
+          } else if (e.data === 'stop') {
+            if (timer) { clearInterval(timer); timer = null; }
+          }
+        };
+      `;
+      const blob = new Blob([blobCode], { type: "application/javascript" });
+      const worker = new Worker(URL.createObjectURL(blob));
+      worker.onmessage = () => {
+        onTick();
+      };
+      worker.postMessage("start");
+      this.bgWorker = worker;
+    } catch (err) {
+      console.warn("[LinguaFloat] Background WebWorker timer unavailable:", err);
+    }
+
+    // 3. Interval backup
+    setInterval(() => {
+      onTick();
+    }, 40);
+
+    // 4. Native audio timeupdate event (fires continuously from audio decoder thread in background)
+    if (this.audio) {
+      this.audio.addEventListener("timeupdate", () => {
+        onTick();
+      });
+    }
+
+    // 5. Visibility change handler: snap UI instantly when window is restored
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        const cur = this.getCurrentPlaybackTime();
+        const dur = this.getTotalDuration();
+        this.updateProgressUI(cur, dur);
+        if (this.activeSegmentIndex !== -1) {
+          this.scrollToSegment(this.activeSegmentIndex, false);
+        }
+      }
+    });
   }
 
   getCurrentPlaybackTime() {
@@ -347,14 +460,19 @@ class MiniLinguaFloatApp {
   syncStep(currentTime) {
     if (!this.words.length) return;
 
+    const now = performance.now();
+    const canLoopSeek = (now - this.lastLoopSeekTime) > 280;
+
     // Feature: Multi-Paragraph Range Loop (A-B)
-    if (this.loopRange !== null) {
+    if (this.loopRange !== null && canLoopSeek) {
       const endSeg = this.segments[this.loopRange.end];
-      if (endSeg && currentTime >= endSeg.end - 0.08 && currentTime <= endSeg.end + 0.4) {
+      const startSeg = this.segments[this.loopRange.start];
+      // Note: Removed narrow upper-bound window so background ticks never miss boundary
+      if (endSeg && startSeg && currentTime >= endSeg.end - 0.08) {
         const maxLoops = this.loopModes[this.loopModeIndex] > 0 ? this.loopModes[this.loopModeIndex] : Infinity;
         if (this.rangeLoopCount < maxLoops) {
           this.rangeLoopCount++;
-          const startSeg = this.segments[this.loopRange.start];
+          this.lastLoopSeekTime = now;
           this.seekTo(startSeg.start);
           this.setActiveSegment(this.loopRange.start, true);
           this.play();
@@ -370,13 +488,15 @@ class MiniLinguaFloatApp {
           }
         }
       }
-    } else if (this.activeSegmentIndex !== -1 && this.loopModes[this.loopModeIndex] > 0) {
+    } else if (this.activeSegmentIndex !== -1 && this.loopModes[this.loopModeIndex] > 0 && canLoopSeek) {
       // Feature 3: Single paragraph Loop / Shadowing check at end of current paragraph
       const curSeg = this.segments[this.activeSegmentIndex];
       const maxLoops = this.loopModes[this.loopModeIndex];
-      if (curSeg && currentTime >= curSeg.end - 0.08 && currentTime <= curSeg.end + 0.3) {
+      // Note: Removed narrow upper-bound window so background ticks never miss boundary
+      if (curSeg && currentTime >= curSeg.end - 0.08) {
         if (this.currentSegmentRepeats < maxLoops) {
           this.currentSegmentRepeats++;
+          this.lastLoopSeekTime = now;
           this.seekTo(curSeg.start);
           this.play();
           const targetStr = maxLoops === Infinity ? "∞" : maxLoops;
@@ -491,7 +611,7 @@ class MiniLinguaFloatApp {
 
       // By default, the playing paragraph sits at the top of the reproducer
       // If user is manually browsing down, do not interrupt them unless forceScroll is true
-      if (this.autoScrollEnabled && (!this.isUserBrowsing || forceScroll)) {
+      if (!document.hidden && this.autoScrollEnabled && (!this.isUserBrowsing || forceScroll)) {
         this.scrollToSegment(segIdx, true);
       }
     }
@@ -715,6 +835,15 @@ class MiniLinguaFloatApp {
       textContainer.className = "parrafo-text";
       parrafoEl.appendChild(textContainer);
 
+      // Translation container (English subtitle)
+      const transContainer = document.createElement("div");
+      transContainer.className = "parrafo-translation";
+      if (seg.translation) {
+        transContainer.textContent = seg.translation;
+      }
+      transContainer.style.display = this.translationEnabled ? "block" : "none";
+      parrafoEl.appendChild(transContainer);
+
       // Clicking ANYWHERE on the paragraph stops current section & starts reproducing it
       parrafoEl.addEventListener("click", (e) => {
         if (e.shiftKey) {
@@ -775,6 +904,9 @@ class MiniLinguaFloatApp {
     this.transcriptContainer.classList.toggle("genders-enabled", this.gendersEnabled);
     if (this.segments.length > 0) {
       this.setActiveSegment(0, true);
+    }
+    if (this.translationEnabled) {
+      this.fetchLessonTranslationsIfNeeded();
     }
   }
 
@@ -994,23 +1126,66 @@ class MiniLinguaFloatApp {
     }
   }
 
-  async promptRenameLesson(item) {
-    const currentName = item.title || item.id;
-    const newName = prompt(`Rename lesson "${currentName}":\n(Updates both audio file and transcript)`, currentName);
-    if (!newName || !newName.trim() || newName.trim() === currentName) {
+  promptRenameLesson(item) {
+    this.openRenameModal(item);
+  }
+
+  openRenameModal(item) {
+    this.pendingRenameItem = item;
+    const currentName = item.title || item.id || "";
+    if (this.renameInput) {
+      this.renameInput.value = currentName;
+    }
+    if (this.renameError) {
+      this.renameError.style.display = "none";
+      this.renameError.textContent = "";
+    }
+    if (this.renameModal) {
+      this.renameModal.style.display = "flex";
+      setTimeout(() => {
+        if (this.renameInput) {
+          this.renameInput.focus();
+          this.renameInput.select();
+        }
+      }, 50);
+    }
+  }
+
+  closeRenameModal() {
+    if (this.renameModal) {
+      this.renameModal.style.display = "none";
+    }
+    this.pendingRenameItem = null;
+  }
+
+  async confirmRenameLesson() {
+    if (!this.pendingRenameItem || !this.renameInput) return;
+    const currentName = this.pendingRenameItem.title || this.pendingRenameItem.id;
+    const newName = this.renameInput.value.trim();
+
+    if (!newName) {
+      this.showRenameError("Lesson name cannot be empty");
       return;
     }
 
-    const clean = newName.trim();
-    this.statusHint.textContent = `Renaming "${currentName}" -> "${clean}"...`;
+    if (newName === currentName) {
+      this.closeRenameModal();
+      return;
+    }
+
+    if (this.btnConfirmRename) {
+      this.btnConfirmRename.disabled = true;
+      this.btnConfirmRename.textContent = "Renaming...";
+    }
+    this.statusHint.textContent = `Renaming "${currentName}" -> "${newName}"...`;
 
     try {
       const res = await fetch("/api/rename-download", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          old_id: item.id,
-          new_name: clean
+          old_id: this.pendingRenameItem.id,
+          new_name: newName
         })
       });
 
@@ -1019,10 +1194,11 @@ class MiniLinguaFloatApp {
         throw new Error(data.error || "Failed to rename");
       }
 
+      this.closeRenameModal();
       this.statusHint.textContent = `Renamed to ${data.new_title}!`;
 
       // If currently loaded lesson matches, update title & audio src smoothly
-      if (this.currentLoadedId === item.id || this.headerTitle.textContent === currentName) {
+      if (this.currentLoadedId === this.pendingRenameItem.id || this.headerTitle.textContent === currentName) {
         this.currentLoadedId = data.new_id;
         this.headerTitle.textContent = data.new_title;
         if (data.audio_url && this.audio) {
@@ -1037,8 +1213,185 @@ class MiniLinguaFloatApp {
       // Refresh library list
       await this.fetchSavedDownloads();
     } catch (err) {
-      alert(`Rename error: ${err.message}`);
+      this.showRenameError(err.message || "Failed to rename lesson");
       this.statusHint.textContent = "Rename failed";
+    } finally {
+      if (this.btnConfirmRename) {
+        this.btnConfirmRename.disabled = false;
+        this.btnConfirmRename.textContent = "Rename";
+      }
+    }
+  }
+
+  showRenameError(msg) {
+    if (this.renameError) {
+      this.renameError.textContent = msg;
+      this.renameError.style.display = "block";
+    }
+  }
+
+  // --- Translation Feature Methods ---
+  toggleTranslation() {
+    this.translationEnabled = !this.translationEnabled;
+    if (this.btnToggleTranslation) {
+      this.btnToggleTranslation.classList.toggle("active", this.translationEnabled);
+    }
+
+    // Toggle visibility of all paragraph translation lines
+    const transEls = this.transcriptContainer.querySelectorAll(".parrafo-translation");
+    transEls.forEach((el) => {
+      el.style.display = this.translationEnabled ? "block" : "none";
+    });
+
+    if (this.translationEnabled) {
+      this.statusHint.textContent = "English subtitles ON";
+      this.fetchLessonTranslationsIfNeeded();
+    } else {
+      this.statusHint.textContent = "English subtitles OFF";
+    }
+  }
+
+  async fetchLessonTranslationsIfNeeded() {
+    if (!this.segments || !this.segments.length || this.isTranslatingBatch) return;
+
+    // Check if any segment is missing a translation or has identical German text
+    const isUntranslated = (seg) => !seg.translation || (seg.text && seg.text.length > 6 && seg.translation.trim().toLowerCase() === seg.text.trim().toLowerCase());
+    const missing = this.segments.some(isUntranslated);
+    if (!missing) {
+      // All already translated, ensure DOM elements are populated
+      this.segments.forEach((seg, idx) => {
+        const parEl = this.parrafoDOMElements[idx];
+        if (parEl) {
+          const tEl = parEl.querySelector(".parrafo-translation");
+          if (tEl && seg.translation) tEl.textContent = seg.translation;
+        }
+      });
+      return;
+    }
+
+    this.isTranslatingBatch = true;
+    this.statusHint.textContent = "Translating text to English...";
+
+    // Show shimmering state on paragraphs that lack translations
+    this.segments.forEach((seg, idx) => {
+      if (isUntranslated(seg)) {
+        const parEl = this.parrafoDOMElements[idx];
+        if (parEl) {
+          const tEl = parEl.querySelector(".parrafo-translation");
+          if (tEl) {
+            tEl.textContent = "Translating...";
+            tEl.classList.add("translating");
+          }
+        }
+      }
+    });
+
+    try {
+      const texts = this.segments.map((s) => s.text || "");
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          texts,
+          lesson_id: this.currentLoadedId
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.translations) {
+        data.translations.forEach((tr, idx) => {
+          if (this.segments[idx]) {
+            this.segments[idx].translation = tr;
+          }
+          const parEl = this.parrafoDOMElements[idx];
+          if (parEl) {
+            const tEl = parEl.querySelector(".parrafo-translation");
+            if (tEl) {
+              tEl.textContent = tr;
+              tEl.classList.remove("translating");
+            }
+          }
+        });
+        this.statusHint.textContent = "English translation ready";
+      } else {
+        throw new Error(data.error || "Translation request failed");
+      }
+    } catch (err) {
+      console.warn("Translation batch error:", err);
+      this.statusHint.textContent = "Translation offline/error";
+      this.segments.forEach((seg, idx) => {
+        const parEl = this.parrafoDOMElements[idx];
+        if (parEl) {
+          const tEl = parEl.querySelector(".parrafo-translation");
+          if (tEl && tEl.classList.contains("translating")) {
+            tEl.textContent = "(Translation unavailable)";
+            tEl.classList.remove("translating");
+          }
+        }
+      });
+    } finally {
+      this.isTranslatingBatch = false;
+    }
+  }
+
+  async handleTextSelection() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+
+    const rawText = sel.toString().trim();
+    if (!rawText || rawText.length < 2 || rawText.length > 200) return;
+
+    // Check if selection is within transcriptContainer
+    try {
+      const range = sel.getRangeAt(0);
+      if (!this.transcriptContainer.contains(range.commonAncestorContainer)) return;
+      const rect = range.getBoundingClientRect();
+      this.showExpressionPopover(rawText, rect);
+    } catch (e) {
+      // Ignore selection errors
+    }
+  }
+
+  async showExpressionPopover(text, rect) {
+    if (!this.expressionPopover) return;
+
+    if (this.popoverDeText) this.popoverDeText.textContent = text;
+    if (this.popoverEnText) this.popoverEnText.textContent = "Translating...";
+    this.expressionPopover.style.display = "block";
+
+    // Position popover intelligently near selection
+    const popoverWidth = 200;
+    let left = rect.left + rect.width / 2 - popoverWidth / 2;
+    left = Math.max(10, Math.min(left, window.innerWidth - popoverWidth - 10));
+
+    let top = rect.top - 58;
+    if (top < 32) {
+      top = rect.bottom + 6;
+    }
+
+    this.expressionPopover.style.left = `${left}px`;
+    this.expressionPopover.style.top = `${top}px`;
+
+    try {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      });
+      const data = await res.json();
+      if (res.ok && data.translated) {
+        if (this.popoverEnText) this.popoverEnText.textContent = data.translated;
+      } else {
+        if (this.popoverEnText) this.popoverEnText.textContent = "(Could not translate)";
+      }
+    } catch (e) {
+      if (this.popoverEnText) this.popoverEnText.textContent = "(Translation error)";
+    }
+  }
+
+  hideExpressionPopover() {
+    if (this.expressionPopover) {
+      this.expressionPopover.style.display = "none";
     }
   }
 
@@ -1674,13 +2027,17 @@ class MiniLinguaFloatApp {
 
     // Ignore if modal is visible
     if ((this.urlModal && this.urlModal.style.display === "flex") ||
-        (this.libraryModal && this.libraryModal.style.display === "flex")) {
+        (this.libraryModal && this.libraryModal.style.display === "flex") ||
+        (this.renameModal && this.renameModal.style.display === "flex")) {
       return;
     }
 
     if (e.code === "Space") {
       e.preventDefault();
       this.togglePlayPause();
+    } else if (e.code === "KeyE") {
+      e.preventDefault();
+      this.toggleTranslation();
     } else if (e.code === "KeyR") {
       e.preventDefault();
       if (this.activeSegmentIndex !== -1) {
@@ -1705,9 +2062,13 @@ class MiniLinguaFloatApp {
     } else if (e.code === "KeyL") {
       e.preventDefault();
       this.toggleAbMode();
-    } else if (e.code === "Escape" && (this.loopRange || this.abSelectionStep > 0)) {
-      e.preventDefault();
-      this.clearLoopRange();
+    } else if (e.code === "Escape") {
+      if (this.expressionPopover && this.expressionPopover.style.display !== "none") {
+        this.hideExpressionPopover();
+      } else if (this.loopRange || this.abSelectionStep > 0) {
+        e.preventDefault();
+        this.clearLoopRange();
+      }
     }
   }
 

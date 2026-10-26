@@ -97,6 +97,8 @@ class TestLinguaFloatServer(unittest.TestCase):
         handler.client_address = ("127.0.0.1", 12345)
         try:
             handler.log_message("code %d, message %s", HTTPStatus.NOT_FOUND, "File not found")
+        except TypeError:
+            self.fail("log_message raised TypeError on HTTPStatus object")
     def test_rename_download_missing_params(self):
         req = urllib.request.Request(
             f"{self.base_url}/api/rename-download",
@@ -173,6 +175,48 @@ class TestLinguaFloatServer(unittest.TestCase):
                 self.assertIn("vMKl23O6z9k", res_data.get("audio_url", ""))
                 self.assertIn("transcript", res_data)
 
+    def test_translate_single_text(self):
+        req = urllib.request.Request(
+            f"{self.base_url}/api/translate",
+            data=json.dumps({"text": "Guten Morgen, mein Freund"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req) as response:
+            self.assertEqual(response.status, 200)
+            data = json.loads(response.read().decode("utf-8"))
+            self.assertTrue(data.get("success"))
+            self.assertIn("morning", data.get("translated", "").lower())
+
+    def test_translate_batch_texts(self):
+        req = urllib.request.Request(
+            f"{self.base_url}/api/translate",
+            data=json.dumps({"texts": ["Hallo Welt", "Auf Wiedersehen"]}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req) as response:
+            self.assertEqual(response.status, 200)
+            data = json.loads(response.read().decode("utf-8"))
+            self.assertTrue(data.get("success"))
+            translations = data.get("translations", [])
+            self.assertEqual(len(translations), 2)
+            self.assertIn("world", translations[0].lower())
+
+    def test_translate_missing_params(self):
+        req = urllib.request.Request(
+            f"{self.base_url}/api/translate",
+            data=json.dumps({}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req) as response:
+                self.assertEqual(response.status, 400)
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()
+

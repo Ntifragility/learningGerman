@@ -34,6 +34,9 @@
         <!-- Noun Gender Highlighting toggle (der=blue, die=red, das=green) -->
         <button id="btn-toggle-gender" class="btn-tool active" title="Noun Genders (der=blue, die=red, das=green)">🎨</button>
 
+        <!-- English Translation Toggle (Show/Hide English text) -->
+        <button id="btn-toggle-translation" class="btn-tool" title="Show / Hide English Translations (E)">EN</button>
+
         <!-- Global Keyboard Shortcuts toggle (Space, R, Arrows) -->
         <button id="btn-toggle-shortcuts" class="btn-tool active" title="Hotkeys: Space=Play, R=Replay, ↓/↑=Next/Prev">⌨️</button>
 
@@ -88,6 +91,16 @@
       <!-- Injected dynamically as .parrafo elements -->
     </main>
 
+    <!-- Floating Selected Expression Popover -->
+    <div id="expression-popover" class="expression-popover" style="display: none;">
+      <div class="popover-top">
+        <span class="popover-badge">DE ➔ EN</span>
+        <button id="btn-close-popover" class="btn-popover-close" title="Close">✕</button>
+      </div>
+      <div id="popover-de-text" class="popover-original"></div>
+      <div id="popover-en-text" class="popover-translation">Translating...</div>
+    </div>
+
     <!-- Processing Progress Overlay -->
     <div id="loader-overlay" class="loader-overlay" style="display: none;">
       <div class="loader-card">
@@ -113,6 +126,25 @@
         <div class="modal-buttons">
           <button id="btn-submit-url" class="btn-modal-primary">Load</button>
           <button id="btn-close-modal" class="btn-modal-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- In-App Lesson Rename Modal -->
+    <div id="rename-modal" class="url-modal" style="display: none;">
+      <div class="url-modal-content rename-modal-content">
+        <div class="library-header">
+          <span class="library-title">✏️ Rename Lesson</span>
+          <button id="btn-close-rename" class="btn-modal-close" title="Close">✕</button>
+        </div>
+        <div class="rename-body">
+          <p class="modal-hint">Enter new name for audio and transcript:</p>
+          <input type="text" id="rename-input" class="url-input" placeholder="Lesson title..." spellcheck="false" autocomplete="off" />
+          <div id="rename-error" class="modal-error-msg" style="display: none;"></div>
+        </div>
+        <div class="modal-buttons" style="margin-top: 8px;">
+          <button id="btn-confirm-rename" class="btn-modal-primary">Rename</button>
+          <button id="btn-cancel-rename" class="btn-modal-secondary">Cancel</button>
         </div>
       </div>
     </div>

@@ -743,3 +743,140 @@ html, body {
   color: var(--accent-gold);
   font-weight: 700;
 }
+
+/* English Translation Styles */
+.btn-tool#btn-toggle-translation.active {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+}
+
+.parrafo-translation {
+  margin-top: 4px;
+  padding-top: 3px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: #94a3b8;
+  font-style: italic;
+  user-select: text;
+  transition: color 0.15s ease;
+}
+
+.parrafo.active-parrafo .parrafo-translation {
+  color: #e2e8f0;
+  border-top-color: rgba(245, 158, 11, 0.25);
+}
+
+.parrafo-translation.translating {
+  color: var(--text-dim);
+  font-style: italic;
+  opacity: 0.7;
+  animation: pulse-trans 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse-trans {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.9; }
+}
+
+/* In-App Rename Modal */
+.rename-modal-content {
+  width: 290px;
+  max-width: 92vw;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rename-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-hint {
+  font-size: 9.5px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.modal-error-msg {
+  font-size: 9.5px;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 3px;
+  padding: 4px 6px;
+  margin-top: 4px;
+}
+
+/* Expression Translation Popover */
+.expression-popover {
+  position: absolute;
+  z-index: 1200;
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 6px;
+  padding: 6px 9px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6), 0 0 10px rgba(56, 189, 248, 0.2);
+  min-width: 140px;
+  max-width: 250px;
+  font-size: 10px;
+  animation: popoverFadeIn 0.15s ease-out;
+  pointer-events: auto;
+}
+
+@keyframes popoverFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.popover-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+  gap: 6px;
+}
+
+.popover-badge {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.btn-popover-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 9px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.btn-popover-close:hover {
+  color: #fff;
+}
+
+.popover-original {
+  font-weight: 600;
+  color: #f1f5f9;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popover-translation {
+  color: #38bdf8;
+  font-style: normal;
+  line-height: 1.3;
+}
+
