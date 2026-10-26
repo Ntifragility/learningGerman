@@ -2,6 +2,8 @@ import os
 import sys
 import json
 import socket
+import shutil
+import re
 from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
@@ -147,6 +149,219 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"error": str(e)}, status=500)
             return
 
+        elif self.path == "/api/rename-download":
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length <= 0:
+                self.send_json_response({"error": "Missing request body"}, status=400)
+                return
+
+            body = self.rfile.read(content_length).decode("utf-8")
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_json_response({"error": "Invalid JSON body"}, status=400)
+                return
+
+            old_id = data.get("old_id", "").strip()
+            new_name = data.get("new_name", "").strip()
+
+            if not old_id or not new_name:
+                self.send_json_response({"error": "Both 'old_id' and 'new_name' are required"}, status=400)
+                return
+
+            # Sanitize new_name: strip illegal characters
+            clean_name = re.sub(r'[\\/*?:"<>|]', "", new_name).strip()
+            if not clean_name:
+                self.send_json_response({"error": "Filename contains invalid characters"}, status=400)
+                return
+
+            old_stem = old_id.replace("_transcript", "")
+            new_stem = clean_name.replace("_transcript", "")
+
+            # Locate old transcript file
+            old_json = DOWNLOADS_DIR / f"{old_stem}_transcript.json"
+            if not old_json.exists():
+                old_json = DOWNLOADS_DIR / f"{old_id}.json"
+
+            if not old_json.exists():
+                self.send_json_response({"error": f"Transcript for '{old_id}' not found"}, status=404)
+                return
+
+            # Find matching audio file
+            old_audio = None
+            for ext in [".m4a", ".mp3", ".wav", ".mp4", ".ogg", ".flac", ".aac"]:
+                cand = DOWNLOADS_DIR / f"{old_stem}{ext}"
+                if cand.exists():
+                    old_audio = cand
+                    break
+
+            new_json = DOWNLOADS_DIR / f"{new_stem}_transcript.json"
+            new_audio = (DOWNLOADS_DIR / f"{new_stem}{old_audio.suffix}") if old_audio else None
+
+            # Collision check if stem changed
+            if new_stem != old_stem:
+                if new_json.exists():
+                    self.send_json_response({"error": f"A lesson named '{new_stem}' already exists"}, status=409)
+                    return
+                if new_audio and new_audio.exists():
+                    self.send_json_response({"error": f"Audio file '{new_audio.name}' already exists"}, status=409)
+                    return
+
+            try:
+                # 1. Rename audio file if exists
+                if old_audio and old_audio.exists() and new_audio and old_audio != new_audio:
+                    old_audio.rename(new_audio)
+
+                # 2. Update JSON contents and write to new_json
+                with open(old_json, "r", encoding="utf-8") as f:
+                    transcript_data = json.load(f)
+
+                meta = transcript_data.setdefault("meta", {})
+                meta["title"] = clean_name
+                if new_audio:
+                    meta["audio_file"] = new_audio.name
+
+                with open(new_json, "w", encoding="utf-8") as f:
+                    json.dump(transcript_data, f, ensure_ascii=False, indent=2)
+
+                if old_json != new_json and old_json.exists():
+                    old_json.unlink()
+
+                print(f"[LinguaFloat] Renamed '{old_stem}' -> '{new_stem}' (audio: {new_audio.name if new_audio else 'None'})")
+
+                self.send_json_response({
+                    "success": True,
+                    "old_id": old_stem,
+                    "new_id": new_stem,
+                    "new_title": clean_name,
+                    "audio_url": f"/downloads/{new_audio.name}" if new_audio else None,
+                    "json_url": f"/downloads/{new_json.name}"
+                })
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.send_json_response({"error": str(e)}, status=500)
+            return
+
+        elif self.path == "/api/load-local-path":
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length <= 0:
+                self.send_json_response({"error": "Missing request body"}, status=400)
+                return
+
+            body = self.rfile.read(content_length).decode("utf-8")
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_json_response({"error": "Invalid JSON body"}, status=400)
+                return
+
+            paths = data.get("paths", [])
+            if isinstance(paths, str):
+                paths = [paths]
+
+            if not paths:
+                self.send_json_response({"error": "No paths provided"}, status=400)
+                return
+
+            selected_files = [Path(p) for p in paths if Path(p).exists()]
+            if not selected_files:
+                self.send_json_response({"error": "Selected files do not exist on disk"}, status=404)
+                return
+
+            json_file = next((f for f in selected_files if f.suffix == ".json"), None)
+            audio_file = next((f for f in selected_files if f.suffix.lower() in [".mp3", ".m4a", ".wav", ".ogg", ".mp4", ".flac", ".aac"]), None)
+
+            # Copy to DOWNLOADS_DIR if outside
+            if audio_file:
+                target_audio = DOWNLOADS_DIR / audio_file.name
+                if audio_file.resolve() != target_audio.resolve():
+                    shutil.copy2(audio_file, target_audio)
+                audio_file = target_audio
+
+            if json_file:
+                target_json = DOWNLOADS_DIR / json_file.name
+                if json_file.resolve() != target_json.resolve():
+                    shutil.copy2(json_file, target_json)
+                json_file = target_json
+
+            # Companion pairing if audio selected without explicit json
+            if audio_file and not json_file:
+                stem = audio_file.stem
+                cand_json = DOWNLOADS_DIR / f"{stem}_transcript.json"
+                if cand_json.exists():
+                    json_file = cand_json
+
+            if json_file and json_file.exists():
+                try:
+                    with open(json_file, "r", encoding="utf-8") as f:
+                        tdata = json.load(f)
+                    meta = tdata.get("meta", {})
+                    if not audio_file:
+                        audio_name = meta.get("audio_file")
+                        if audio_name and (DOWNLOADS_DIR / audio_name).exists():
+                            audio_file = DOWNLOADS_DIR / audio_name
+                    self.send_json_response({
+                        "success": True,
+                        "title": meta.get("title") or (audio_file.stem if audio_file else json_file.stem),
+                        "audio_url": f"/downloads/{audio_file.name}" if audio_file else None,
+                        "transcript": tdata
+                    })
+                    return
+                except Exception as e:
+                    self.send_json_response({"error": f"Failed reading transcript: {e}"}, status=500)
+                    return
+
+            if audio_file:
+                self.send_json_response({
+                    "success": True,
+                    "needs_transcription": True,
+                    "filename": audio_file.name,
+                    "audio_url": f"/downloads/{audio_file.name}",
+                    "title": audio_file.stem
+                })
+                return
+
+            self.send_json_response({"error": "No valid audio or transcript found"}, status=400)
+            return
+
+        elif self.path == "/api/transcribe-existing":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length).decode("utf-8")
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_json_response({"error": "Invalid JSON body"}, status=400)
+                return
+
+            filename = data.get("filename")
+            if not filename:
+                self.send_json_response({"error": "Missing filename"}, status=400)
+                return
+
+            audio_path = DOWNLOADS_DIR / filename
+            if not audio_path.exists():
+                self.send_json_response({"error": f"File '{filename}' not found in downloads"}, status=404)
+                return
+
+            stem = audio_path.stem
+            json_dest = DOWNLOADS_DIR / f"{stem}_transcript.json"
+
+            try:
+                aligner = TranscriptAligner(model_size="base", device="cpu", compute_type="int8")
+                transcript = aligner.process_audio(audio_path, output_json=json_dest, language="de")
+                self.send_json_response({
+                    "success": True,
+                    "title": stem,
+                    "audio_url": f"/downloads/{filename}",
+                    "transcript": transcript
+                })
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.send_json_response({"error": str(e)}, status=500)
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -219,15 +434,38 @@ def main():
         print("=" * 60 + "\n")
 
         class DesktopBridge:
+            def __init__(self, downloads_dir):
+                self.window = None
+                self.downloads_dir = str(downloads_dir)
+
+            def set_window(self, win):
+                self.window = win
+
             def resize_window(self, width, height):
                 try:
-                    if window:
-                        window.resize(int(width), int(height))
+                    if self.window:
+                        self.window.resize(int(width), int(height))
                     return True
                 except Exception:
                     return False
 
-        bridge = DesktopBridge()
+            def open_file_dialog(self):
+                try:
+                    import webview
+                    if self.window:
+                        res = self.window.create_file_dialog(
+                            webview.OPEN_DIALOG,
+                            directory=self.downloads_dir,
+                            allow_multiple=True,
+                            file_types=('Audio & Transcripts (*.mp3;*.m4a;*.wav;*.json)', 'All files (*.*)')
+                        )
+                        return list(res) if res else []
+                    return []
+                except Exception as e:
+                    print(f"[DesktopBridge] File dialog error: {e}")
+                    return []
+
+        bridge = DesktopBridge(DOWNLOADS_DIR)
 
         window = webview.create_window(
             title="LinguaFloat DE",
@@ -242,6 +480,7 @@ def main():
             easy_drag=True,
             js_api=bridge
         )
+        bridge.set_window(window)
         webview.start()
 
     except Exception as e:

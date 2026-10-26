@@ -34,6 +34,7 @@ class MiniLinguaFloatApp {
     this.btnCycleSpeed = document.getElementById("btn-cycle-speed");
     this.btnToggleScroll = document.getElementById("btn-toggle-scroll");
     this.headerTitle = document.getElementById("header-title");
+    this.currentLoadedId = null;
 
     // Modal elements
     this.btnOpenUrlModal = document.getElementById("btn-open-url-modal");
@@ -194,9 +195,33 @@ class MiniLinguaFloatApp {
       });
     }
     if (this.btnBrowseLocal) {
-      this.btnBrowseLocal.addEventListener("click", () => {
+      this.btnBrowseLocal.addEventListener("click", async () => {
         if (this.libraryModal) this.libraryModal.style.display = "none";
+
+        // 1. If pywebview desktop window is available, open native Windows Explorer dialog in downloads/
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.open_file_dialog === "function") {
+          try {
+            const paths = await window.pywebview.api.open_file_dialog();
+            if (paths && paths.length) {
+              await this.loadLocalPaths(paths);
+              return;
+            }
+          } catch (err) {
+            console.warn("Desktop file dialog error, fallback to browser input:", err);
+          }
+        }
+
+        // 2. Fallback to standard browser file picker
         this.localFileInput.click();
+      });
+    }
+
+    // Header title click: 1-click rename of currently loaded lesson
+    if (this.headerTitle) {
+      this.headerTitle.addEventListener("click", () => {
+        if (this.currentLoadedId) {
+          this.promptRenameLesson({ id: this.currentLoadedId, title: this.headerTitle.textContent });
+        }
       });
     }
 
@@ -828,7 +853,11 @@ class MiniLinguaFloatApp {
         this.hideLoader();
 
         if (data.transcript) {
+          const lessonId = data.video_id || (data.transcript && data.transcript.meta && data.transcript.meta.id) || (data.title || "YouTube Audio");
+          this.currentLoadedId = lessonId;
           this.headerTitle.textContent = data.title || "YouTube Audio";
+          this.headerTitle.classList.add("has-lesson");
+          this.headerTitle.title = "Click to rename active lesson";
           this.renderTranscript(data.transcript);
 
           if (data.audio_url) {
@@ -930,12 +959,31 @@ class MiniLinguaFloatApp {
         info.appendChild(title);
         info.appendChild(meta);
 
+        const actions = document.createElement("div");
+        actions.className = "library-item-actions";
+
+        const renameBtn = document.createElement("button");
+        renameBtn.className = "library-btn-rename";
+        renameBtn.title = "Rename lesson & audio file";
+        renameBtn.textContent = "✏️";
+        renameBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.promptRenameLesson(item);
+        });
+
         const playBtn = document.createElement("button");
         playBtn.className = "library-play-btn";
         playBtn.textContent = "▶ Load";
+        playBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.loadSavedItem(item);
+        });
+
+        actions.appendChild(renameBtn);
+        actions.appendChild(playBtn);
 
         itemEl.appendChild(info);
-        itemEl.appendChild(playBtn);
+        itemEl.appendChild(actions);
 
         itemEl.addEventListener("click", () => this.loadSavedItem(item));
 
@@ -943,6 +991,54 @@ class MiniLinguaFloatApp {
       });
     } catch (err) {
       this.libraryList.innerHTML = '<div class="library-empty">Failed to load downloads list</div>';
+    }
+  }
+
+  async promptRenameLesson(item) {
+    const currentName = item.title || item.id;
+    const newName = prompt(`Rename lesson "${currentName}":\n(Updates both audio file and transcript)`, currentName);
+    if (!newName || !newName.trim() || newName.trim() === currentName) {
+      return;
+    }
+
+    const clean = newName.trim();
+    this.statusHint.textContent = `Renaming "${currentName}" -> "${clean}"...`;
+
+    try {
+      const res = await fetch("/api/rename-download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          old_id: item.id,
+          new_name: clean
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Failed to rename");
+      }
+
+      this.statusHint.textContent = `Renamed to ${data.new_title}!`;
+
+      // If currently loaded lesson matches, update title & audio src smoothly
+      if (this.currentLoadedId === item.id || this.headerTitle.textContent === currentName) {
+        this.currentLoadedId = data.new_id;
+        this.headerTitle.textContent = data.new_title;
+        if (data.audio_url && this.audio) {
+          const wasPlaying = this.isPlaying;
+          const currTime = this.audio.currentTime || 0;
+          this.audio.src = data.audio_url;
+          this.audio.currentTime = currTime;
+          if (wasPlaying) this.play();
+        }
+      }
+
+      // Refresh library list
+      await this.fetchSavedDownloads();
+    } catch (err) {
+      alert(`Rename error: ${err.message}`);
+      this.statusHint.textContent = "Rename failed";
     }
   }
 
@@ -955,7 +1051,10 @@ class MiniLinguaFloatApp {
       if (!res.ok) throw new Error("Could not load transcript JSON");
       const transcriptData = await res.json();
 
+      this.currentLoadedId = item.id;
       this.headerTitle.textContent = item.title;
+      this.headerTitle.classList.add("has-lesson");
+      this.headerTitle.title = "Click to rename active lesson";
       this.renderTranscript(transcriptData);
 
       if (item.audio_url) {
@@ -969,6 +1068,107 @@ class MiniLinguaFloatApp {
     } catch (err) {
       console.error(err);
       this.statusHint.textContent = "Error loading saved lesson";
+    }
+  }
+
+  async loadLocalPaths(paths) {
+    this.statusHint.textContent = "Loading file from disk...";
+    try {
+      const res = await fetch("/api/load-local-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Could not load selected file");
+      }
+
+      if (data.needs_transcription) {
+        const doTranscribe = confirm(`"${data.filename}" does not have a transcript yet.\n\nTranscribe with Whisper AI to generate synchronized German text?`);
+        if (doTranscribe) {
+          await this.transcribeExistingServerFile(data.filename);
+        } else {
+          this.activePlayerType = "audio";
+          this.audio.src = data.audio_url;
+          this.audio.load();
+          this.headerTitle.textContent = data.title;
+          this.statusHint.textContent = "Audio loaded (no text)";
+        }
+        return;
+      }
+
+      if (data.transcript) {
+        this.currentLoadedId = data.title;
+        this.headerTitle.textContent = data.title;
+        this.headerTitle.classList.add("has-lesson");
+        this.headerTitle.title = "Click to rename active lesson";
+        this.renderTranscript(data.transcript);
+        if (data.audio_url) {
+          this.activePlayerType = "audio";
+          this.audio.src = data.audio_url;
+          this.audio.load();
+        }
+        this.statusHint.textContent = `Ready • ${data.title}`;
+        this.play();
+      }
+    } catch (err) {
+      console.error(err);
+      this.statusHint.textContent = `Error: ${err.message}`;
+    }
+  }
+
+  async transcribeExistingServerFile(filename) {
+    this.showLoader("Transcribing Audio", `Running Whisper AI on ${filename}...`);
+    this.setLoaderProgress(15, "Whisper AI processing audio...");
+
+    let simulatedPct = 15;
+    this.loaderInterval = setInterval(() => {
+      if (simulatedPct < 85) {
+        simulatedPct += 2;
+        this.setLoaderProgress(simulatedPct, "Whisper AI transcribing German words & VAD...");
+      } else if (simulatedPct < 96) {
+        simulatedPct += 0.5;
+        this.setLoaderProgress(simulatedPct, "Aligning word timestamps...");
+      }
+    }, 450);
+
+    try {
+      const res = await fetch("/api/transcribe-existing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "Transcription failed");
+
+      clearInterval(this.loaderInterval);
+      this.setLoaderProgress(100, "Done! Interactive script ready.");
+
+      setTimeout(() => {
+        this.hideLoader();
+        if (data.transcript) {
+          this.currentLoadedId = data.title;
+          this.headerTitle.textContent = data.title;
+          this.headerTitle.classList.add("has-lesson");
+          this.headerTitle.title = "Click to rename active lesson";
+          this.renderTranscript(data.transcript);
+          if (data.audio_url) {
+            this.activePlayerType = "audio";
+            this.audio.src = data.audio_url;
+            this.audio.load();
+          }
+          this.statusHint.textContent = "Ready • Click paragraph to play";
+          this.play();
+        }
+      }, 500);
+    } catch (err) {
+      clearInterval(this.loaderInterval);
+      console.warn("Transcribe error:", err);
+      this.setLoaderProgress(0, "Error transcribing audio");
+      this.loaderTitle.textContent = "Transcription Failed";
+      this.statusHint.textContent = "Error: Check terminal";
+      setTimeout(() => this.hideLoader(), 2500);
     }
   }
 
@@ -1183,7 +1383,11 @@ class MiniLinguaFloatApp {
       setTimeout(() => {
         this.hideLoader();
         if (data.transcript) {
+          const stemName = (data.title || file.name).replace(/\.[^/.]+$/, "");
+          this.currentLoadedId = stemName;
           this.headerTitle.textContent = data.title || file.name;
+          this.headerTitle.classList.add("has-lesson");
+          this.headerTitle.title = "Click to rename active lesson";
           this.renderTranscript(data.transcript);
           if (data.audio_url) {
             this.activePlayerType = "audio";
