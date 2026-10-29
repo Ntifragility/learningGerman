@@ -972,10 +972,8 @@ class MiniLinguaFloatApp {
         body: JSON.stringify({ url: url })
       });
 
-      if (!res.ok) throw new Error("Processing failed on server");
-      const data = await res.json();
-
-      if (data.error) throw new Error(data.error);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || `Processing failed on server (${res.status})`);
 
       // Finish progress to 100%
       clearInterval(this.loaderInterval);
@@ -1008,13 +1006,13 @@ class MiniLinguaFloatApp {
     } catch (err) {
       clearInterval(this.loaderInterval);
       console.warn("API error:", err);
-      this.setLoaderProgress(0, "Error: Could not process audio");
+      this.setLoaderProgress(0, `Error: ${err.message || "Could not process audio"}`);
       this.loaderTitle.textContent = "Processing Failed";
-      this.statusHint.textContent = "Error: Check URL or main.py terminal";
+      this.statusHint.textContent = `Error: ${err.message || "Check URL or main.py terminal"}`;
 
       setTimeout(() => {
         this.hideLoader();
-      }, 2500);
+      }, 3500);
     }
   }
 
@@ -1518,10 +1516,10 @@ class MiniLinguaFloatApp {
     } catch (err) {
       clearInterval(this.loaderInterval);
       console.warn("Transcribe error:", err);
-      this.setLoaderProgress(0, "Error transcribing audio");
+      this.setLoaderProgress(0, `Error: ${err.message || "transcribing audio"}`);
       this.loaderTitle.textContent = "Transcription Failed";
-      this.statusHint.textContent = "Error: Check terminal";
-      setTimeout(() => this.hideLoader(), 2500);
+      this.statusHint.textContent = `Error: ${err.message || "Check terminal"}`;
+      setTimeout(() => this.hideLoader(), 3500);
     }
   }
 
@@ -1726,9 +1724,8 @@ class MiniLinguaFloatApp {
         body: file
       });
 
-      if (!res.ok) throw new Error("Local transcription failed on server");
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || `Local transcription failed on server (${res.status})`);
 
       clearInterval(this.loaderInterval);
       this.setLoaderProgress(100, "Done! Interactive script ready.");
@@ -1754,10 +1751,10 @@ class MiniLinguaFloatApp {
     } catch (err) {
       clearInterval(this.loaderInterval);
       console.warn("Transcribe error:", err);
-      this.setLoaderProgress(0, "Error transcribing audio");
+      this.setLoaderProgress(0, `Error: ${err.message || "transcribing audio"}`);
       this.loaderTitle.textContent = "Transcription Failed";
-      this.statusHint.textContent = "Error: Check terminal";
-      setTimeout(() => this.hideLoader(), 2500);
+      this.statusHint.textContent = `Error: ${err.message || "Check terminal"}`;
+      setTimeout(() => this.hideLoader(), 3500);
     }
   }
 

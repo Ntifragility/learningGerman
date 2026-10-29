@@ -39,6 +39,14 @@ class TestLinguaFloatServer(unittest.TestCase):
             self.assertEqual(response.status, 204)
             self.assertEqual(response.read(), b"")
 
+    def test_downloads_path_traversal_blocked(self):
+        req = urllib.request.Request(f"{self.base_url}/downloads/..%2Frequirements.txt")
+        try:
+            with urllib.request.urlopen(req) as response:
+                self.fail("Path traversal request should not return 200")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 403)
+
     def test_list_downloads_endpoint(self):
         req = urllib.request.Request(f"{self.base_url}/api/list-downloads")
         with urllib.request.urlopen(req) as response:
@@ -52,6 +60,30 @@ class TestLinguaFloatServer(unittest.TestCase):
                 self.assertIn("title", first)
                 self.assertIn("duration_sec", first)
                 self.assertIn("json_url", first)
+
+    def test_list_downloads_with_query_params(self):
+        req = urllib.request.Request(f"{self.base_url}/api/list-downloads?cache_bust=12345")
+        with urllib.request.urlopen(req) as response:
+            self.assertEqual(response.status, 200)
+
+    def test_options_cors_preflight(self):
+        req = urllib.request.Request(f"{self.base_url}/api/translate", method="OPTIONS")
+        with urllib.request.urlopen(req) as response:
+            self.assertEqual(response.status, 204)
+            self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
+
+    def test_downloads_range_request_partial_content(self):
+        sample_audio = DOWNLOADS_DIR / "vMKl23O6z9k.m4a"
+        if sample_audio.exists():
+            req = urllib.request.Request(
+                f"{self.base_url}/downloads/vMKl23O6z9k.m4a",
+                headers={"Range": "bytes=10-20"}
+            )
+            with urllib.request.urlopen(req) as response:
+                self.assertEqual(response.status, 206)
+                self.assertEqual(response.headers.get("Content-Length"), "11")
+                self.assertIn("bytes 10-20/", response.headers.get("Content-Range", ""))
+                self.assertEqual(len(response.read()), 11)
 
     def test_process_youtube_missing_url(self):
         req = urllib.request.Request(
@@ -174,6 +206,19 @@ class TestLinguaFloatServer(unittest.TestCase):
                 self.assertTrue(res_data.get("success"))
                 self.assertIn("vMKl23O6z9k", res_data.get("audio_url", ""))
                 self.assertIn("transcript", res_data)
+
+    def test_translate_cognate_word_cached(self):
+        req = urllib.request.Request(
+            f"{self.base_url}/api/translate",
+            data=json.dumps({"text": "Hotel"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req) as response:
+            self.assertEqual(response.status, 200)
+            data = json.loads(response.read().decode("utf-8"))
+            self.assertTrue(data.get("success"))
+            self.assertEqual(data.get("translated", "").lower(), "hotel")
 
     def test_translate_single_text(self):
         req = urllib.request.Request(

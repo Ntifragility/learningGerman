@@ -46,7 +46,7 @@ def translate_text(text: str) -> str:
                 data = json.loads(res.read().decode("utf-8"))
                 parts = [part[0] for part in data[0] if part and part[0]]
                 translated = "".join(parts).strip()
-                if translated and translated.lower() != cleaned.lower():
+                if translated:
                     TRANSLATION_CACHE[cleaned] = translated
                     return translated
         except Exception as e:
@@ -62,13 +62,14 @@ def translate_text(text: str) -> str:
             with urllib.request.urlopen(req, timeout=8) as res:
                 data = json.loads(res.read().decode("utf-8"))
                 matches = data.get("responseData", {}).get("translatedText", "")
-                if matches and matches.strip() and matches.lower() != cleaned.lower():
+                if matches and matches.strip():
                     TRANSLATION_CACHE[cleaned] = matches.strip()
                     return matches.strip()
         except Exception as e:
             if attempt == 1:
                 print(f"[Translation] MyMemory fallback error: {e}")
 
+    TRANSLATION_CACHE[cleaned] = cleaned
     return cleaned
 
 
@@ -76,13 +77,23 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(UI_DIR), **kwargs)
 
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Filename")
+        self.end_headers()
+
     def do_GET(self):
-        if self.path == "/favicon.ico":
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
             return
 
-        if self.path == "/api/list-downloads":
+        if path == "/api/list-downloads":
             items = []
             for json_file in sorted(DOWNLOADS_DIR.glob("*_transcript.json"), key=lambda p: p.stat().st_mtime, reverse=True):
                 try:
@@ -109,30 +120,100 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
             self.send_json_response({"items": items})
             return
 
-        if self.path.startswith("/downloads/"):
-            rel_path = urllib.parse.unquote(self.path[len("/downloads/"):])
-            file_path = DOWNLOADS_DIR / rel_path
+        if path.startswith("/downloads/"):
+            rel_path = urllib.parse.unquote(path[len("/downloads/"):])
+            try:
+                file_path = (DOWNLOADS_DIR / rel_path).resolve()
+                downloads_resolved = DOWNLOADS_DIR.resolve()
+                if not file_path.is_relative_to(downloads_resolved):
+                    self.send_response(403)
+                    self.end_headers()
+                    return
+            except Exception:
+                self.send_response(400)
+                self.end_headers()
+                return
+
             if file_path.exists() and file_path.is_file():
-                self.send_response(200)
+                file_size = file_path.stat().st_size
                 if file_path.suffix in [".m4a", ".mp4"]:
-                    self.send_header("Content-Type", "audio/mp4")
+                    content_type = "audio/mp4"
                 elif file_path.suffix in [".mp3"]:
-                    self.send_header("Content-Type", "audio/mpeg")
+                    content_type = "audio/mpeg"
                 elif file_path.suffix in [".wav"]:
-                    self.send_header("Content-Type", "audio/wav")
+                    content_type = "audio/wav"
+                elif file_path.suffix in [".json"]:
+                    content_type = "application/json"
                 else:
-                    self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Length", str(file_path.stat().st_size))
+                    content_type = "application/octet-stream"
+
+                range_header = self.headers.get("Range")
+                if range_header and range_header.startswith("bytes="):
+                    try:
+                        val = range_header[len("bytes="):].strip()
+                        start_str, _, end_str = val.partition("-")
+                        if start_str and end_str:
+                            start = int(start_str)
+                            end = min(int(end_str), file_size - 1)
+                        elif start_str:
+                            start = int(start_str)
+                            end = file_size - 1
+                        elif end_str:
+                            start = max(0, file_size - int(end_str))
+                            end = file_size - 1
+                        else:
+                            start = 0
+                            end = file_size - 1
+
+                        if start > end or start >= file_size:
+                            self.send_response(416)
+                            self.send_header("Content-Range", f"bytes */{file_size}")
+                            self.end_headers()
+                            return
+
+                        length = end - start + 1
+                        self.send_response(206)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+                        self.send_header("Content-Length", str(length))
+                        self.send_header("Accept-Ranges", "bytes")
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.end_headers()
+
+                        with open(file_path, "rb") as f:
+                            f.seek(start)
+                            remaining = length
+                            chunk_size = 64 * 1024
+                            while remaining > 0:
+                                chunk = f.read(min(remaining, chunk_size))
+                                if not chunk:
+                                    break
+                                self.wfile.write(chunk)
+                                remaining -= len(chunk)
+                        return
+                    except Exception as re:
+                        print(f"[Downloads] Range request parsing error: {re}")
+
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(file_size))
                 self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 with open(file_path, "rb") as f:
                     self.copyfile(f, self.wfile)
                 return
+            self.send_response(404)
+            self.end_headers()
+            return
 
         return super().do_GET()
 
     def do_POST(self):
-        if self.path == "/api/process-youtube":
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path == "/api/process-youtube":
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length).decode("utf-8")
             data = json.loads(body)
@@ -152,7 +233,7 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"error": str(e)}, status=500)
             return
 
-        elif self.path == "/api/transcribe-local":
+        elif path == "/api/transcribe-local":
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length <= 0:
                 self.send_json_response({"error": "No audio data provided"}, status=400)
@@ -181,7 +262,7 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
                         remaining -= len(chunk)
 
                 aligner = TranscriptAligner(model_size="base", device="cpu", compute_type="int8")
-                transcript = aligner.process_audio(audio_dest, output_json=json_dest, language="de")
+                transcript = aligner.process_audio(audio_dest, output_json=json_dest, language="de", title=safe_filename)
 
                 self.send_json_response({
                     "success": True,
@@ -195,7 +276,7 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"error": str(e)}, status=500)
             return
 
-        elif self.path == "/api/rename-download":
+        elif path == "/api/rename-download":
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length <= 0:
                 self.send_json_response({"error": "Missing request body"}, status=400)
@@ -289,7 +370,7 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"error": str(e)}, status=500)
             return
 
-        elif self.path == "/api/load-local-path":
+        elif path == "/api/load-local-path":
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length <= 0:
                 self.send_json_response({"error": "Missing request body"}, status=400)
@@ -371,7 +452,7 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
             self.send_json_response({"error": "No valid audio or transcript found"}, status=400)
             return
 
-        elif self.path == "/api/transcribe-existing":
+        elif path == "/api/transcribe-existing":
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length).decode("utf-8")
             try:
@@ -395,7 +476,7 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
 
             try:
                 aligner = TranscriptAligner(model_size="base", device="cpu", compute_type="int8")
-                transcript = aligner.process_audio(audio_path, output_json=json_dest, language="de")
+                transcript = aligner.process_audio(audio_path, output_json=json_dest, language="de", title=stem)
                 self.send_json_response({
                     "success": True,
                     "title": stem,
@@ -408,7 +489,7 @@ class LinguaFloatHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"error": str(e)}, status=500)
             return
 
-        elif self.path == "/api/translate":
+        elif path == "/api/translate":
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length <= 0:
                 self.send_json_response({"error": "Missing request body"}, status=400)
@@ -547,16 +628,16 @@ def main():
 
         class DesktopBridge:
             def __init__(self, downloads_dir):
-                self.window = None
-                self.downloads_dir = str(downloads_dir)
+                self._window = None
+                self._downloads_dir = str(downloads_dir)
 
             def set_window(self, win):
-                self.window = win
+                self._window = win
 
             def resize_window(self, width, height):
                 try:
-                    if self.window:
-                        self.window.resize(int(width), int(height))
+                    if self._window:
+                        self._window.resize(int(width), int(height))
                     return True
                 except Exception:
                     return False
@@ -564,10 +645,10 @@ def main():
             def open_file_dialog(self):
                 try:
                     import webview
-                    if self.window:
-                        res = self.window.create_file_dialog(
+                    if self._window:
+                        res = self._window.create_file_dialog(
                             webview.OPEN_DIALOG,
-                            directory=self.downloads_dir,
+                            directory=self._downloads_dir,
                             allow_multiple=True,
                             file_types=('Audio & Transcripts (*.mp3;*.m4a;*.wav;*.json)', 'All files (*.*)')
                         )

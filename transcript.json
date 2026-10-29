@@ -1,22 +1,42 @@
 {
-  "meta": {
-    "audio_file": "episode_01.mp3",
-    "duration_sec": 184.2,
-    "language": "de",
-    "word_count": 248
-  },
-  "segments": [
-    {
-      "id": 0,
-      "start": 0.0,
-      "end": 2.45,
-      "text": "Hey hallo guten Morgen"
-    }
-  ],
-  "words": [
-    {"w": "Hey", "s": 0.0, "e": 0.42, "seg": 0},
-    {"w": "hallo", "s": 0.48, "e": 0.95, "seg": 0},
-    {"w": "guten", "s": 1.10, "e": 1.55, "seg": 0},
-    {"w": "Morgen", "s": 1.58, "e": 2.10, "seg": 0}
-  ]
+    "meta": {
+        "audio_file": "episode_01.mp3",
+        "duration_sec": 184.2,
+        "language": "de",
+        "word_count": 248
+    },
+    "segments": [
+        {
+            "id": 0,
+            "start": 0.0,
+            "end": 2.45,
+            "text": "Hey hallo guten Morgen"
+        }
+    ],
+    "words": [
+        {
+            "w": "Hey",
+            "s": 0.0,
+            "e": 0.42,
+            "seg": 0
+        },
+        {
+            "w": "hallo",
+            "s": 0.48,
+            "e": 0.95,
+            "seg": 0
+        },
+        {
+            "w": "guten",
+            "s": 1.10,
+            "e": 1.55,
+            "seg": 0
+        },
+        {
+            "w": "Morgen",
+            "s": 1.58,
+            "e": 2.10,
+            "seg": 0
+        }
+    ]
 }

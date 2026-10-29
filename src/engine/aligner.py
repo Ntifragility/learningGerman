@@ -26,7 +26,8 @@ class TranscriptAligner:
         self,
         audio_path: str | Path,
         output_json: Optional[str | Path] = None,
-        language: str = "de"
+        language: str = "de",
+        title: Optional[str] = None
     ) -> Dict[str, Any]:
         audio_path = Path(audio_path).resolve()
         if not audio_path.exists():
@@ -40,11 +41,15 @@ class TranscriptAligner:
             vad_parameters=dict(min_silence_duration_ms=500)
         )
 
+        duration = round(info.duration, 2) if (info and getattr(info, "duration", None) is not None) else 0.0
+        lang = getattr(info, "language", None) or language
+
         data = {
             "meta": {
+                "title": title or audio_path.stem,
                 "audio_file": audio_path.name,
-                "duration_sec": round(info.duration, 2),
-                "language": info.language or language,
+                "duration_sec": duration,
+                "language": lang,
                 "word_count": 0,
                 "segment_count": 0
             },
@@ -147,15 +152,16 @@ def get_youtube_transcript_or_audio(url: str, output_dir: str | Path) -> Dict[st
     dl_result = download_youtube_audio(url, output_dir)
     audio_path = Path(dl_result["audio_path"])
     vid_id = dl_result.get("id") or video_id
+    video_title = dl_result.get("title") or audio_path.stem
 
     # Whisper transcription
     aligner = TranscriptAligner(model_size="base", device="cpu", compute_type="int8")
     json_path = Path(output_dir) / f"{audio_path.stem}_transcript.json"
-    transcript = aligner.process_audio(audio_path, output_json=json_path, language="de")
+    transcript = aligner.process_audio(audio_path, output_json=json_path, language="de", title=video_title)
 
     return {
         "success": True,
-        "title": dl_result.get("title"),
+        "title": video_title,
         "video_id": vid_id,
         "audio_url": f"/downloads/{audio_path.name}",
         "transcript": transcript
